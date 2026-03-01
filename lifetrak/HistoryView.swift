@@ -39,7 +39,7 @@ struct HistoryView: View {
         }
         .onAppear {
             if viewModel == nil {
-                viewModel = HistoryViewModel(modelContext: modelContext)
+                viewModel = HistoryViewModel(modelContext: modelContext, healthService: HealthKitService())
             } else {
                 viewModel?.refresh()
             }
@@ -58,6 +58,9 @@ struct HistoryView: View {
             List {
                 ForEach(vm.daySummaries) { summary in
                     Section {
+                        if let sleepNight = summary.sleepNight {
+                            SleepCard(sleepNight: sleepNight)
+                        }
                         ForEach(summary.entries) { entry in
                             entryRow(entry)
                                 .contentShape(Rectangle())
@@ -100,8 +103,10 @@ struct HistoryView: View {
         HStack {
             Text(summary.date, format: .dateTime.weekday(.wide).month().day())
             Spacer()
-            Text("\(formatAmount(summary.total)) oz")
-                .fontWeight(.semibold)
+            if !summary.entries.isEmpty {
+                Text("\(formatAmount(summary.total)) oz")
+                    .fontWeight(.semibold)
+            }
         }
     }
 

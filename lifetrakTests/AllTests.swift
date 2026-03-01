@@ -838,6 +838,435 @@ struct AllTests {
         #expect(vm2.servingSize == 12.0)
     }
 
+    // MARK: - SleepNight: Computed properties
+
+    @Test func sleepNight_timeInBed() {
+        let start = Date(timeIntervalSince1970: 0)
+        let end = Date(timeIntervalSince1970: 8 * 3600)
+        let night = SleepNight(
+            date: Calendar.current.startOfDay(for: end),
+            inBedInterval: DateInterval(start: start, end: end),
+            totalSleepDuration: 7 * 3600,
+            stages: nil
+        )
+        #expect(night.timeInBed == 8 * 3600)
+    }
+
+    @Test func sleepNight_efficiency() {
+        let start = Date(timeIntervalSince1970: 0)
+        let end = Date(timeIntervalSince1970: 8 * 3600)
+        let night = SleepNight(
+            date: Calendar.current.startOfDay(for: end),
+            inBedInterval: DateInterval(start: start, end: end),
+            totalSleepDuration: 7 * 3600,
+            stages: nil
+        )
+        #expect(night.efficiency == 7.0 / 8.0)
+    }
+
+    @Test func sleepNight_efficiencyZeroWhenNoTimeInBed() {
+        let date = Date(timeIntervalSince1970: 0)
+        let night = SleepNight(
+            date: date,
+            inBedInterval: DateInterval(start: date, end: date),
+            totalSleepDuration: 0,
+            stages: nil
+        )
+        #expect(night.efficiency == 0)
+    }
+
+    // MARK: - TimeInterval: Sleep formatting
+
+    @Test func sleepFormatted_hoursAndMinutes() {
+        let interval: TimeInterval = 7 * 3600 + 32 * 60
+        #expect(interval.sleepFormatted == "7h 32m")
+    }
+
+    @Test func sleepFormatted_minutesOnly() {
+        let interval: TimeInterval = 45 * 60
+        #expect(interval.sleepFormatted == "45m")
+    }
+
+    @Test func sleepFormatted_zero() {
+        let interval: TimeInterval = 0
+        #expect(interval.sleepFormatted == "0m")
+    }
+
+    @Test func sleepFormatted_exactHours() {
+        let interval: TimeInterval = 8 * 3600
+        #expect(interval.sleepFormatted == "8h 0m")
+    }
+
+    // MARK: - SleepAggregator: Basic
+
+    @Test func aggregator_emptyInput() {
+        let result = SleepAggregator.aggregate([])
+        #expect(result.isEmpty)
+    }
+
+    @Test func aggregator_singleNightUnspecified() {
+        let cal = Calendar.current
+        let bedtime = cal.date(from: DateComponents(year: 2026, month: 2, day: 15, hour: 23, minute: 0))!
+        let wakeup = cal.date(from: DateComponents(year: 2026, month: 2, day: 16, hour: 7, minute: 0))!
+
+        let samples = [
+            RawSleepSample(startDate: bedtime, endDate: wakeup, category: .asleepUnspecified)
+        ]
+
+        let result = SleepAggregator.aggregate(samples)
+        #expect(result.count == 1)
+        let duration: Double = result.first?.totalSleepDuration ?? -1
+        #expect(duration == 28800.0) // 8 * 3600
+    }
+
+    @Test func aggregator_assignsToWakeUpDay() {
+        let cal = Calendar.current
+        // Sunday night -> Monday morning
+        let bedtime = cal.date(from: DateComponents(year: 2026, month: 3, day: 1, hour: 23, minute: 14))!
+        let wakeup = cal.date(from: DateComponents(year: 2026, month: 3, day: 2, hour: 6, minute: 46))!
+
+        let samples = [
+            RawSleepSample(startDate: bedtime, endDate: wakeup, category: .asleepUnspecified)
+        ]
+
+        let result = SleepAggregator.aggregate(samples)
+        let expectedDate = cal.date(from: DateComponents(year: 2026, month: 3, day: 2))!
+        #expect(result.first?.date == expectedDate)
+    }
+
+    // MARK: - SleepAggregator: Stages
+
+    @Test func aggregator_withStages() {
+        let cal = Calendar.current
+        let base = cal.date(from: DateComponents(year: 2026, month: 3, day: 1, hour: 23, minute: 0))!
+
+        let samples = [
+            RawSleepSample(startDate: base, endDate: base.addingTimeInterval(2 * 3600), category: .asleepCore),
+            RawSleepSample(startDate: base.addingTimeInterval(2 * 3600), endDate: base.addingTimeInterval(3.5 * 3600), category: .asleepDeep),
+            RawSleepSample(startDate: base.addingTimeInterval(3.5 * 3600), endDate: base.addingTimeInterval(5 * 3600), category: .asleepREM),
+            RawSleepSample(startDate: base.addingTimeInterval(5 * 3600), endDate: base.addingTimeInterval(5.5 * 3600), category: .awake),
+            RawSleepSample(startDate: base.addingTimeInterval(5.5 * 3600), endDate: base.addingTimeInterval(8 * 3600), category: .asleepCore),
+        ]
+
+        let result = SleepAggregator.aggregate(samples)
+        #expect(result.count == 1)
+
+        let night = result.first!
+        #expect(night.stages != nil)
+        #expect(night.stages!.core == 4.5 * 3600) // 2h + 2.5h
+        #expect(night.stages!.deep == 1.5 * 3600)
+        #expect(night.stages!.rem == 1.5 * 3600)
+        #expect(night.stages!.awake == 0.5 * 3600)
+
+        // totalSleep = core + deep + rem (not awake)
+        let expectedSleep = 4.5 * 3600 + 1.5 * 3600 + 1.5 * 3600
+        #expect(night.totalSleepDuration == expectedSleep)
+    }
+
+    @Test func aggregator_noStagesWhenOnlyUnspecified() {
+        let cal = Calendar.current
+        let bedtime = cal.date(from: DateComponents(year: 2026, month: 3, day: 1, hour: 23, minute: 0))!
+        let wakeup = cal.date(from: DateComponents(year: 2026, month: 3, day: 2, hour: 7, minute: 0))!
+
+        let samples = [
+            RawSleepSample(startDate: bedtime, endDate: wakeup, category: .asleepUnspecified)
+        ]
+
+        let result = SleepAggregator.aggregate(samples)
+        #expect(result.first?.stages == nil)
+    }
+
+    @Test func aggregator_inBedDoesNotCountAsSleep() {
+        let cal = Calendar.current
+        let inBedStart = cal.date(from: DateComponents(year: 2026, month: 2, day: 15, hour: 22, minute: 30))!
+        let asleepStart = cal.date(from: DateComponents(year: 2026, month: 2, day: 15, hour: 23, minute: 0))!
+        let end = cal.date(from: DateComponents(year: 2026, month: 2, day: 16, hour: 7, minute: 0))!
+
+        let samples = [
+            RawSleepSample(startDate: inBedStart, endDate: asleepStart, category: .inBed),
+            RawSleepSample(startDate: asleepStart, endDate: end, category: .asleepUnspecified),
+        ]
+
+        let result = SleepAggregator.aggregate(samples)
+        #expect(result.count == 1)
+        // Sleep = 8h (23:00 to 07:00), not 8.5h
+        let sleepDuration: Double = result.first?.totalSleepDuration ?? -1
+        #expect(sleepDuration == 28800.0) // 8 * 3600
+        // Time in bed includes the inBed period = 8.5h
+        let inBed: Double = result.first?.timeInBed ?? -1
+        #expect(inBed == 30600.0) // 8.5 * 3600
+    }
+
+    // MARK: - SleepAggregator: Nap filtering
+
+    @Test func aggregator_filtersOutNaps() {
+        let cal = Calendar.current
+        let napStart = cal.date(from: DateComponents(year: 2026, month: 3, day: 2, hour: 14, minute: 0))!
+        let napEnd = cal.date(from: DateComponents(year: 2026, month: 3, day: 2, hour: 15, minute: 30))!
+
+        let samples = [
+            RawSleepSample(startDate: napStart, endDate: napEnd, category: .asleepUnspecified)
+        ]
+
+        let result = SleepAggregator.aggregate(samples)
+        #expect(result.isEmpty) // filtered out (< 3 hours)
+    }
+
+    @Test func aggregator_keepsSleepJustOver3Hours() {
+        let cal = Calendar.current
+        let bedtime = cal.date(from: DateComponents(year: 2026, month: 3, day: 2, hour: 2, minute: 0))!
+        let wakeup = cal.date(from: DateComponents(year: 2026, month: 3, day: 2, hour: 5, minute: 1))!
+
+        let samples = [
+            RawSleepSample(startDate: bedtime, endDate: wakeup, category: .asleepUnspecified)
+        ]
+
+        let result = SleepAggregator.aggregate(samples)
+        #expect(result.count == 1)
+    }
+
+    // MARK: - SleepAggregator: Multiple nights
+
+    @Test func aggregator_separatesMultipleNights() {
+        let cal = Calendar.current
+        let night1Start = cal.date(from: DateComponents(year: 2026, month: 3, day: 1, hour: 23, minute: 0))!
+        let night1End = cal.date(from: DateComponents(year: 2026, month: 3, day: 2, hour: 7, minute: 0))!
+        let night2Start = cal.date(from: DateComponents(year: 2026, month: 3, day: 2, hour: 23, minute: 0))!
+        let night2End = cal.date(from: DateComponents(year: 2026, month: 3, day: 3, hour: 6, minute: 30))!
+
+        let samples = [
+            RawSleepSample(startDate: night1Start, endDate: night1End, category: .asleepUnspecified),
+            RawSleepSample(startDate: night2Start, endDate: night2End, category: .asleepUnspecified),
+        ]
+
+        let result = SleepAggregator.aggregate(samples)
+        #expect(result.count == 2)
+        // Newest first
+        #expect(result[0].date > result[1].date)
+    }
+
+    @Test func aggregator_mergesAdjacentSamplesIntoOneNight() {
+        let cal = Calendar.current
+        let base = cal.date(from: DateComponents(year: 2026, month: 3, day: 1, hour: 23, minute: 0))!
+
+        // Two samples 10 minutes apart — same session
+        let samples = [
+            RawSleepSample(startDate: base, endDate: base.addingTimeInterval(4 * 3600), category: .asleepCore),
+            RawSleepSample(startDate: base.addingTimeInterval(4 * 3600 + 600), endDate: base.addingTimeInterval(8 * 3600), category: .asleepDeep),
+        ]
+
+        let result = SleepAggregator.aggregate(samples)
+        #expect(result.count == 1) // merged into one night
+    }
+
+    @Test func aggregator_splitsSamplesWithLargeGap() {
+        let cal = Calendar.current
+        let session1Start = cal.date(from: DateComponents(year: 2026, month: 3, day: 1, hour: 23, minute: 0))!
+        let session1End = cal.date(from: DateComponents(year: 2026, month: 3, day: 2, hour: 3, minute: 0))!
+        // 2-hour gap (> 30 min threshold)
+        let session2Start = cal.date(from: DateComponents(year: 2026, month: 3, day: 2, hour: 5, minute: 0))!
+        let session2End = cal.date(from: DateComponents(year: 2026, month: 3, day: 2, hour: 8, minute: 30))!
+
+        let samples = [
+            RawSleepSample(startDate: session1Start, endDate: session1End, category: .asleepUnspecified),
+            RawSleepSample(startDate: session2Start, endDate: session2End, category: .asleepUnspecified),
+        ]
+
+        let result = SleepAggregator.aggregate(samples)
+        // Each session is >= 3h, so both are primary sleep? session1 = 4h, session2 = 3.5h
+        #expect(result.count == 2)
+    }
+
+    // MARK: - HistoryViewModel + Sleep: Merge
+
+    @Test func history_sleepMergesWithWater() async throws {
+        let container = try TestHelpers.makeContainer()
+        let context = container.mainContext
+        let mock = MockHealthKitService()
+
+        let cal = Calendar.current
+        let today = cal.startOfDay(for: .now)
+
+        // Water entry for today
+        context.insert(WaterEntry(amount: 16.0))
+        try context.save()
+
+        // Sleep for today
+        mock.mockSleepNights = [makeSleepNight(for: today)]
+
+        let hvm = HistoryViewModel(modelContext: context, healthService: mock)
+        await hvm.refreshWithSleep()
+
+        #expect(hvm.daySummaries.count == 1)
+        #expect(hvm.daySummaries.first?.sleepNight != nil)
+        #expect(hvm.daySummaries.first?.entries.count == 1)
+        #expect(hvm.daySummaries.first?.total == 16.0)
+    }
+
+    @Test func history_sleepOnlyDay() async throws {
+        let container = try TestHelpers.makeContainer()
+        let context = container.mainContext
+        let mock = MockHealthKitService()
+
+        let cal = Calendar.current
+        let yesterday = cal.date(byAdding: .day, value: -1, to: cal.startOfDay(for: .now))!
+
+        // No water entries, just sleep
+        mock.mockSleepNights = [makeSleepNight(for: yesterday)]
+
+        let hvm = HistoryViewModel(modelContext: context, healthService: mock)
+        await hvm.refreshWithSleep()
+
+        #expect(hvm.daySummaries.count == 1)
+        #expect(hvm.daySummaries.first?.sleepNight != nil)
+        #expect(hvm.daySummaries.first?.entries.isEmpty == true)
+        #expect(hvm.daySummaries.first?.total == 0.0)
+    }
+
+    @Test func history_waterOnlyDayHasNilSleep() async throws {
+        let container = try TestHelpers.makeContainer()
+        let context = container.mainContext
+        let mock = MockHealthKitService()
+
+        // Water but no sleep
+        context.insert(WaterEntry(amount: 8.0))
+        try context.save()
+
+        mock.mockSleepNights = [] // no sleep data
+
+        let hvm = HistoryViewModel(modelContext: context, healthService: mock)
+        await hvm.refreshWithSleep()
+
+        #expect(hvm.daySummaries.count == 1)
+        #expect(hvm.daySummaries.first?.sleepNight == nil)
+        #expect(hvm.daySummaries.first?.entries.count == 1)
+    }
+
+    @Test func history_sleepAndWaterOnDifferentDays() async throws {
+        let container = try TestHelpers.makeContainer()
+        let context = container.mainContext
+        let mock = MockHealthKitService()
+
+        let cal = Calendar.current
+        let today = cal.startOfDay(for: .now)
+        let yesterday = cal.date(byAdding: .day, value: -1, to: today)!
+
+        // Water today
+        context.insert(WaterEntry(amount: 12.0))
+        try context.save()
+
+        // Sleep yesterday
+        mock.mockSleepNights = [makeSleepNight(for: yesterday)]
+
+        let hvm = HistoryViewModel(modelContext: context, healthService: mock)
+        await hvm.refreshWithSleep()
+
+        #expect(hvm.daySummaries.count == 2)
+        // Today: water only
+        let todaySummary = hvm.daySummaries.first(where: { $0.date == today })
+        #expect(todaySummary?.entries.count == 1)
+        #expect(todaySummary?.sleepNight == nil)
+        // Yesterday: sleep only
+        let yesterdaySummary = hvm.daySummaries.first(where: { $0.date == yesterday })
+        #expect(yesterdaySummary?.entries.isEmpty == true)
+        #expect(yesterdaySummary?.sleepNight != nil)
+    }
+
+    // MARK: - HistoryViewModel + Sleep: Authorization
+
+    @Test func history_healthKitUnavailable() async throws {
+        let container = try TestHelpers.makeContainer()
+        let context = container.mainContext
+        let mock = MockHealthKitService()
+        mock.isAvailable = false
+
+        let hvm = HistoryViewModel(modelContext: context, healthService: mock)
+        await hvm.refreshWithSleep()
+
+        #expect(hvm.healthAuthStatus == .unavailable)
+        #expect(mock.authorizationRequested == false)
+    }
+
+    @Test func history_requestsAuthorizationOnFirstLoad() async throws {
+        let container = try TestHelpers.makeContainer()
+        let context = container.mainContext
+        let mock = MockHealthKitService()
+
+        let hvm = HistoryViewModel(modelContext: context, healthService: mock)
+        await hvm.refreshWithSleep()
+
+        #expect(mock.authorizationRequested == true)
+        #expect(hvm.healthAuthStatus == .requested)
+    }
+
+    @Test func history_authorizationRequestedOnlyOnce() async throws {
+        let container = try TestHelpers.makeContainer()
+        let context = container.mainContext
+        let mock = MockHealthKitService()
+
+        let hvm = HistoryViewModel(modelContext: context, healthService: mock)
+        await hvm.refreshWithSleep()
+        mock.authorizationRequested = false // reset
+
+        await hvm.refreshWithSleep()
+        #expect(mock.authorizationRequested == false) // not requested again
+    }
+
+    // MARK: - HistoryViewModel + Sleep: Error handling
+
+    @Test func history_sleepFetchFailureStillShowsWater() async throws {
+        let container = try TestHelpers.makeContainer()
+        let context = container.mainContext
+        let mock = MockHealthKitService()
+        mock.shouldThrowOnFetch = true
+
+        context.insert(WaterEntry(amount: 20.0))
+        try context.save()
+
+        let hvm = HistoryViewModel(modelContext: context, healthService: mock)
+        await hvm.refreshWithSleep()
+
+        // Water still shows despite sleep fetch failure
+        #expect(hvm.daySummaries.count == 1)
+        #expect(hvm.daySummaries.first?.total == 20.0)
+        #expect(hvm.daySummaries.first?.sleepNight == nil)
+    }
+
+    @Test func history_authFailureStillShowsWater() async throws {
+        let container = try TestHelpers.makeContainer()
+        let context = container.mainContext
+        let mock = MockHealthKitService()
+        mock.shouldThrowOnAuth = true
+
+        context.insert(WaterEntry(amount: 8.0))
+        try context.save()
+
+        let hvm = HistoryViewModel(modelContext: context, healthService: mock)
+        await hvm.refreshWithSleep()
+
+        // Water still shows despite auth failure
+        #expect(hvm.daySummaries.count == 1)
+        #expect(hvm.daySummaries.first?.total == 8.0)
+    }
+
+    // MARK: - HistoryViewModel + Sleep: No health service (backward compat)
+
+    @Test func history_noHealthServiceSkipsSleep() throws {
+        let container = try TestHelpers.makeContainer()
+        let context = container.mainContext
+
+        context.insert(WaterEntry(amount: 8.0))
+        try context.save()
+
+        // No health service — matches existing behavior
+        let hvm = HistoryViewModel(modelContext: context)
+        hvm.refresh()
+
+        #expect(hvm.daySummaries.count == 1)
+        #expect(hvm.daySummaries.first?.sleepNight == nil)
+        #expect(hvm.daySummaries.first?.total == 8.0)
+    }
+
     // MARK: - Helpers
 
     /// Returns (TodayViewModel, ModelContainer). The container MUST be kept alive
@@ -853,5 +1282,18 @@ struct AllTests {
         let container = try TestHelpers.makeContainer()
         let hvm = HistoryViewModel(modelContext: container.mainContext)
         return (hvm, container)
+    }
+
+    /// Creates a test SleepNight for a given date with reasonable defaults.
+    private func makeSleepNight(for date: Date, totalSleep: TimeInterval = 7.5 * 3600) -> SleepNight {
+        let cal = Calendar.current
+        let bedtime = cal.date(byAdding: .hour, value: -8, to: cal.date(byAdding: .hour, value: 7, to: date)!)!
+        let wakeup = cal.date(byAdding: .hour, value: 7, to: date)!
+        return SleepNight(
+            date: date,
+            inBedInterval: DateInterval(start: bedtime, end: wakeup),
+            totalSleepDuration: totalSleep,
+            stages: SleepStages(core: 3.5 * 3600, deep: 1.5 * 3600, rem: 2 * 3600, awake: 0.5 * 3600)
+        )
     }
 }
