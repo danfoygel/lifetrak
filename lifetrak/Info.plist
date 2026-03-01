@@ -6,5 +6,7 @@
 	<array>
 		<string>remote-notification</string>
 	</array>
+	<key>NSHealthShareUsageDescription</key>
+	<string>LifeTrak reads your sleep data from Apple Health to show sleep history alongside your daily habits.</string>
 </dict>
 </plist>
