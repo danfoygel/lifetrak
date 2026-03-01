@@ -12,19 +12,19 @@ This is an Xcode project (no SPM Package.swift at the root). All build/test comm
 
 ```bash
 # Build
-xcodebuild -scheme lifetrak -destination 'platform=iOS Simulator,name=iPhone 17 Pro' build
+xcodebuild -scheme lifetrak -destination 'platform=iOS Simulator,name=iPhone 14' build
 
 # Run all tests
-xcodebuild -scheme lifetrak -destination 'platform=iOS Simulator,name=iPhone 17 Pro' test
+xcodebuild -scheme lifetrak -destination 'platform=iOS Simulator,name=iPhone 14' test
 
 # Run only unit tests
-xcodebuild -scheme lifetrak -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -only-testing:lifetrakTests test
+xcodebuild -scheme lifetrak -destination 'platform=iOS Simulator,name=iPhone 14' -only-testing:lifetrakTests test
 
 # Run only UI tests
-xcodebuild -scheme lifetrak -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -only-testing:lifetrakUITests test
+xcodebuild -scheme lifetrak -destination 'platform=iOS Simulator,name=iPhone 14' -only-testing:lifetrakUITests test
 
 # Run a single test (Swift Testing)
-xcodebuild -scheme lifetrak -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -only-testing:'lifetrakTests/TestClassName/testMethodName' test
+xcodebuild -scheme lifetrak -destination 'platform=iOS Simulator,name=iPhone 14' -only-testing:'lifetrakTests/TestClassName/testMethodName' test
 ```
 
 ## Architecture
