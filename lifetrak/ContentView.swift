@@ -1,28 +1,33 @@
-//
-//  ContentView.swift
-//  lifetrak
-//
-//  Created by Dan Foygel on 2/28/26.
-//
-
 import SwiftUI
+import SwiftData
 
 struct ContentView: View {
+    @Environment(\.modelContext) private var modelContext
+    @Query(
+        filter: #Predicate<WaterEntry> { _ in true },
+        sort: \WaterEntry.timestamp,
+        order: .reverse
+    ) private var entries: [WaterEntry]
+
     var body: some View {
-        VStack(spacing: 20) {
-            Image(systemName: "heart.fill")
-                .font(.system(size: 60))
-                .foregroundStyle(.red)
-            Text("Hello, Dird!")
-                .font(.largeTitle)
-                .fontWeight(.bold)
-            Text("Parsley is a nice chimalin skimanimkinmalin")
-                .font(.title3)
-                .foregroundStyle(.secondary)
+        NavigationStack {
+            VStack(spacing: 20) {
+                Image(systemName: "drop.fill")
+                    .font(.system(size: 60))
+                    .foregroundStyle(.blue)
+                Text("LifeTrak")
+                    .font(.largeTitle)
+                    .fontWeight(.bold)
+                Text("Water tracking coming soon")
+                    .font(.title3)
+                    .foregroundStyle(.secondary)
+            }
+            .navigationTitle("Today")
         }
     }
 }
 
 #Preview {
     ContentView()
+        .modelContainer(for: WaterEntry.self, inMemory: true)
 }
