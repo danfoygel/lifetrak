@@ -3,7 +3,19 @@ import SwiftData
 
 struct ContentView: View {
     var body: some View {
-        TodayView()
+        TabView {
+            Tab("Today", systemImage: "drop.fill") {
+                TodayView()
+            }
+
+            Tab("History", systemImage: "calendar") {
+                HistoryView()
+            }
+
+            Tab("Settings", systemImage: "gearshape") {
+                SettingsView()
+            }
+        }
     }
 }
 

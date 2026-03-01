@@ -21,6 +21,8 @@ struct TodayView: View {
         .onAppear {
             if viewModel == nil {
                 viewModel = TodayViewModel(modelContext: modelContext)
+            } else {
+                viewModel?.refresh()
             }
         }
     }

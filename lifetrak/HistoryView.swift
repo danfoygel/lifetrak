@@ -40,6 +40,8 @@ struct HistoryView: View {
         .onAppear {
             if viewModel == nil {
                 viewModel = HistoryViewModel(modelContext: modelContext)
+            } else {
+                viewModel?.refresh()
             }
         }
     }
