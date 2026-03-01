@@ -1,19 +1,41 @@
 import Foundation
 import SwiftData
 
+/// Keys for water settings stored in UserDefaults.
+enum WaterSettings {
+    static let dailyGoalKey = "waterDailyGoal"
+    static let servingSizeKey = "waterServingSize"
+
+    static let defaultDailyGoal: Double = 64.0
+    static let defaultServingSize: Double = 8.0
+}
+
 @MainActor
 @Observable
 final class TodayViewModel {
     private let modelContext: ModelContext
+    private let defaults: UserDefaults
 
     var todayEntries: [WaterEntry] = []
     var todayTotal: Double = 0.0
 
-    var dailyGoal: Double = 64.0
-    var servingSize: Double = 8.0
+    var dailyGoal: Double {
+        didSet { defaults.set(dailyGoal, forKey: WaterSettings.dailyGoalKey) }
+    }
+    var servingSize: Double {
+        didSet { defaults.set(servingSize, forKey: WaterSettings.servingSizeKey) }
+    }
 
-    init(modelContext: ModelContext) {
+    init(modelContext: ModelContext, defaults: UserDefaults = .standard) {
         self.modelContext = modelContext
+        self.defaults = defaults
+
+        let storedGoal = defaults.double(forKey: WaterSettings.dailyGoalKey)
+        self.dailyGoal = storedGoal > 0 ? storedGoal : WaterSettings.defaultDailyGoal
+
+        let storedServing = defaults.double(forKey: WaterSettings.servingSizeKey)
+        self.servingSize = storedServing > 0 ? storedServing : WaterSettings.defaultServingSize
+
         refresh()
     }
 
