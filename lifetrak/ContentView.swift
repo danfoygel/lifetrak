@@ -1,28 +1,25 @@
-//
-//  ContentView.swift
-//  lifetrak
-//
-//  Created by Dan Foygel on 2/28/26.
-//
-
 import SwiftUI
+import SwiftData
 
 struct ContentView: View {
     var body: some View {
-        VStack(spacing: 20) {
-            Image(systemName: "heart.fill")
-                .font(.system(size: 60))
-                .foregroundStyle(.red)
-            Text("Hello, Dird!")
-                .font(.largeTitle)
-                .fontWeight(.bold)
-            Text("Parsley is a nice chimalin skimanimkinmalin")
-                .font(.title3)
-                .foregroundStyle(.secondary)
+        TabView {
+            Tab("Today", systemImage: "drop.fill") {
+                TodayView()
+            }
+
+            Tab("History", systemImage: "calendar") {
+                HistoryView()
+            }
+
+            Tab("Settings", systemImage: "gearshape") {
+                SettingsView()
+            }
         }
     }
 }
 
 #Preview {
     ContentView()
+        .modelContainer(for: WaterEntry.self, inMemory: true)
 }

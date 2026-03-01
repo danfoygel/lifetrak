@@ -26,11 +26,17 @@ Write a plan (in this file) for how we're going to build this.  Do whatever rese
 
 ---
 
-# Plan
+# Plan — Tracer Round: Water Tracking
+
+## Strategy
+
+Instead of building horizontally across many tracker types, we're doing a **tracer round** — one data element (water intake) built end-to-end with full functionality. This validates the entire stack (models, persistence, UI, progress visualization, history, settings) before generalizing to other trackers.
+
+Once the water tracer round is complete and feels good, we'll generalize the architecture to support additional tracker types.
 
 ## Current State
 
-Xcode has generated a working SwiftUI + SwiftData scaffold with a basic list view, a placeholder `Item` model, and empty test targets. CloudKit entitlements and push notifications are configured but not yet wired up. We have a clean git history and a solid starting point.
+Xcode has generated a working SwiftUI + SwiftData scaffold with a placeholder `Item` model, a "Hello World" content view, and empty test targets. CloudKit entitlements and push notifications are configured but not yet wired up.
 
 ## Technical Stack
 
@@ -38,12 +44,11 @@ Xcode has generated a working SwiftUI + SwiftData scaffold with a basic list vie
 |-------|--------|-----|
 | UI | **SwiftUI** | Already set up; declarative, modern, good for rapid iteration |
 | Persistence | **SwiftData** | Already set up; Apple's modern ORM, works naturally with SwiftUI |
-| Health Data | **HealthKit** | Apple's framework for reading health metrics (heart rate, sleep, steps, etc.) |
 | Architecture | **MVVM** | Natural fit for SwiftUI's data binding; keeps views thin and logic testable |
+| Charts | **Swift Charts** | Apple's native charting framework; works naturally with SwiftUI |
 | Unit Tests | **Swift Testing** | Already scaffolded; modern, expressive test framework |
 | UI Tests | **XCTest** | Already scaffolded; standard for UI automation |
 | CI | **GitHub Actions** | Free for personal repos; `xcodebuild test` in a macOS runner |
-| Dependency Mgmt | **Swift Package Manager** | Built into Xcode; no CocoaPods/Carthage overhead needed |
 
 ## Architecture
 
@@ -53,126 +58,109 @@ Xcode has generated a working SwiftUI + SwiftData scaffold with a basic list vie
 │  (SwiftUI screens - thin, declarative)       │
 ├─────────────────────────────────────────────┤
 │                ViewModels                    │
-│  (ObservableObject classes - business logic) │
-├─────────────────────────────────────────────┤
-│                 Services                     │
-│  HealthKitService, NotificationService       │
+│  (@Observable classes - business logic)      │
 ├─────────────────────────────────────────────┤
 │                  Models                      │
 │  SwiftData @Model classes                    │
 ├─────────────────────────────────────────────┤
-│              SwiftData / HealthKit           │
-│  (Persistence & OS frameworks)               │
+│              SwiftData                       │
+│  (Persistence framework)                     │
 └─────────────────────────────────────────────┘
 ```
 
-**Key architectural decisions:**
-- **Protocol-based services** — e.g., `HealthDataProviding` protocol so we can inject a mock in tests instead of hitting real HealthKit
-- **ViewModels are unit-testable** — no UIKit/SwiftUI imports in ViewModels; they work with plain data
-- **Models are the source of truth** — SwiftData models hold all persisted state; ViewModels query/mutate them
+**Key decisions:**
+- **@Observable** (not ObservableObject) — modern Swift observation, less boilerplate
+- **ViewModels are unit-testable** — business logic lives here, not in views
+- **Models are the source of truth** — SwiftData models hold all persisted state
+- **No services layer yet** — we'll add it when we need HealthKit/notifications; no premature abstraction
 
-## Data Models (Draft)
+## Data Model
+
+For the water tracer round, we only need one model:
 
 ```swift
-// What the user tracks (configured in Settings)
-@Model TrackerDefinition {
-    name: String              // "Water", "Medication X", "Meditation"
-    category: TrackerCategory // .medication, .hydration, .exercise, .habit, .custom
-    unit: String?             // "oz", "mg", "minutes", nil for simple check-off
-    dailyGoal: Double?        // 64 (oz), 1 (took it), 30 (minutes)
-    icon: String              // SF Symbol name
-    color: String             // hex color
-    isArchived: Bool
-    sortOrder: Int
-}
+@Model
+class WaterEntry {
+    var timestamp: Date
+    var amount: Double       // in ounces
 
-// Each time the user logs something
-@Model TrackerEntry {
-    tracker: TrackerDefinition
-    timestamp: Date
-    value: Double             // 8 (oz), 1 (yes/no), 20 (minutes)
-    note: String?
-}
-
-// Cached snapshots from HealthKit (read-only display)
-@Model HealthSnapshot {
-    metricType: HealthMetricType  // .heartRate, .steps, .sleep, .activeEnergy
-    date: Date
-    value: Double
-    unit: String
+    init(timestamp: Date = .now, amount: Double) {
+        self.timestamp = timestamp
+        self.amount = amount
+    }
 }
 ```
 
+Water settings (daily goal, default serving size) will be stored in `@AppStorage` / `UserDefaults` since they're simple key-value preferences, not relational data.
+
+When we generalize later, this will evolve into a more generic `TrackerEntry` model with a relationship to a `TrackerDefinition`.
+
 ## Feature Build Order
 
-We'll build in vertical slices — each phase delivers a usable feature end-to-end, with tests.
+Each step delivers working, tested functionality.
 
-### Phase 1: Foundation & Settings
-**Goal:** Replace the Xcode template with real data models and a settings screen to configure trackers.
+### Step 1: Model & Persistence
+**Goal:** Replace the placeholder `Item` with `WaterEntry` and verify persistence works.
 
-1. Define `TrackerDefinition` model and write unit tests for it
-2. Build Settings screen — CRUD for tracker definitions (name, category, goal, icon)
-3. Replace `Item` model and `ContentView` with the new structure
-4. Set up CI (GitHub Actions running tests on push)
+- Define `WaterEntry` SwiftData model
+- Write unit tests: create, read, delete entries; query today's entries; sum today's total
+- Register model in the app's `ModelContainer`
+- Remove placeholder `Item` model
+- Set up CI (GitHub Actions running tests on push)
 
-### Phase 2: Data Entry (Core Loop)
-**Goal:** The main screen where you one-tap to log activities.
+### Step 2: Today Screen — Quick Logging
+**Goal:** The main screen where you tap to log water.
 
-1. Build the "Today" dashboard view — shows all active trackers with current progress
-2. Implement one-tap logging (tap = create a `TrackerEntry` with value=1 or configurable increment)
-3. Add quick-entry variations: simple toggle, counter (+1 each tap), quantity input (e.g., "how many oz?")
-4. Haptic feedback and animations on log
+- Build the Today view showing today's water progress
+- Large tap target button to log a serving (default 8 oz)
+- Display current total vs. daily goal (e.g., "32 / 64 oz")
+- Progress ring or bar showing percentage toward goal
+- List of today's individual entries below the progress display
+- Haptic feedback on log
 
-### Phase 3: Progress Rings (Gamification)
-**Goal:** Visual motivation to complete daily goals.
+### Step 3: Settings
+**Goal:** Configure water tracking preferences.
 
-1. Build ring/progress components (similar to Apple Activity rings)
-2. Show daily completion percentage per tracker
-3. Add an overall "day score" — percentage of all goals met
-4. Celebrate 100% completion (animation, optional notification)
+- Settings screen accessible from Today view (gear icon or tab)
+- Configure daily goal (oz)
+- Configure default serving size (oz)
+- Simple form-based UI
 
-### Phase 4: History & Editing
+### Step 4: History & Editing
 **Goal:** Browse and correct past entries.
 
-1. Build a history view — filterable by tracker, date range
-2. Detail view for each entry (edit value, timestamp, note)
-3. Add/delete entries manually (fix mistakes)
-4. Calendar heat-map view showing activity density
+- History view showing entries grouped by day
+- Tap an entry to edit amount or timestamp
+- Swipe to delete an entry
+- Add an entry manually (backfill a missed log)
+- Day summary showing total for each day
 
-### Phase 5: Apple Health Integration
-**Goal:** Pull health metrics and display alongside manual tracking.
+### Step 5: Progress Visualization
+**Goal:** Motivating visuals and trend data.
 
-1. Implement `HealthKitService` with authorization flow
-2. Read heart rate, steps, sleep, active energy (configurable)
-3. Store snapshots in `HealthSnapshot` for offline display
-4. Show health data in the Today dashboard alongside manual trackers
+- Progress ring component on the Today screen (animated, fills as you drink)
+- Celebration animation when daily goal is reached
+- Weekly bar chart (Swift Charts) showing daily totals for the past 7 days
+- Current streak display (consecutive days meeting goal)
 
-### Phase 6: Analysis & Trends
-**Goal:** Visualizations that surface insights.
+### Step 6: Polish
+**Goal:** Make it feel like a finished, single-purpose app.
 
-1. Streak tracking (consecutive days meeting a goal)
-2. Trend charts (weekly/monthly views using Swift Charts)
-3. Correlation hints (e.g., "You sleep better on days you exercise")
-4. Export data (CSV or JSON)
-
-### Phase 7: Polish & Quality of Life
-**Goal:** Make it feel like a finished app.
-
-1. Notifications/reminders (e.g., "Don't forget evening meds")
-2. Widgets (iOS home screen widget showing today's progress)
-3. App icon and visual design polish
-4. Onboarding flow for first launch
-5. iCloud sync via CloudKit (entitlements already configured)
+- Tab bar navigation (Today / History / Settings)
+- App icon refresh (water-themed)
+- Empty states (first launch, no entries yet)
+- Proper date formatting and localization of units
+- Smooth animations and transitions
 
 ## TDD Approach
 
-For each feature:
-1. **Write model/logic tests first** — verify data transformations, goal calculations, streak logic
+For each step:
+1. **Write model/logic tests first** — verify calculations, queries, edge cases
 2. **Implement the minimum code** to make tests pass
-3. **Build the view** — SwiftUI previews for rapid visual iteration
-4. **Add UI tests** for critical flows (logging an entry, editing settings)
+3. **Build the view** — use SwiftUI previews for rapid visual iteration
+4. **Add UI tests** for critical user flows
 
-We'll keep test coverage high on ViewModels and Services (where the logic lives). Views will be thin enough that SwiftUI previews + targeted UI tests provide sufficient coverage.
+Focus test coverage on ViewModels (where logic lives). Views stay thin.
 
 ## CI Pipeline (GitHub Actions)
 
@@ -187,54 +175,39 @@ jobs:
       - report results
 ```
 
-Simple to start — we can add linting (SwiftLint), code coverage reporting, and build artifact archiving later.
-
-## File/Folder Structure (Target)
+## File/Folder Structure (Target for Tracer Round)
 
 ```
 lifetrak/
-├── App/
-│   └── lifetrakApp.swift
+├── lifetrakApp.swift
 ├── Models/
-│   ├── TrackerDefinition.swift
-│   ├── TrackerEntry.swift
-│   ├── HealthSnapshot.swift
-│   └── Enums/ (TrackerCategory, HealthMetricType)
+│   └── WaterEntry.swift
 ├── ViewModels/
 │   ├── TodayViewModel.swift
-│   ├── SettingsViewModel.swift
 │   ├── HistoryViewModel.swift
-│   └── AnalyticsViewModel.swift
+│   └── SettingsViewModel.swift
 ├── Views/
-│   ├── Today/
-│   ├── Settings/
-│   ├── History/
-│   ├── Analytics/
-│   └── Components/ (ProgressRing, TrackerCard, etc.)
-├── Services/
-│   ├── HealthKitService.swift
-│   └── NotificationService.swift
+│   ├── TodayView.swift
+│   ├── HistoryView.swift
+│   ├── SettingsView.swift
+│   └── Components/
+│       ├── ProgressRing.swift
+│       └── WaterEntryRow.swift
 └── Resources/
     ├── Assets.xcassets
     └── Info.plist
 ```
 
----
+Intentionally flat and simple. We'll add structure as the app grows.
 
-# Questions for You
+## What Comes After the Tracer Round
 
-Before we start building, a few things to clarify:
-
-1. **Tracker types** — I'm planning for three input modes: simple toggle (did it / didn't), counter (tap to increment), and quantity input (type a number). Does that cover your use cases, or do you need others (e.g., duration timer, rating scale 1-5)?
-
-2. **Medications specifically** — Do you want medication tracking to support dose times (morning/evening), dosage amounts (mg), and refill reminders? Or is a simple "took it" toggle sufficient?
-
-3. **Apple Health data** — Which metrics do you actually care about? Heart rate, sleep, and steps are the most common. Others available: active calories, walking distance, blood oxygen, respiratory rate, mindful minutes, etc.
-
-4. **Notifications** — Do you want reminder notifications (e.g., "Time to take evening meds")? If so, how sophisticated — fixed times, or smart reminders that notice you haven't logged something yet?
-
-5. **iCloud sync** — The project has CloudKit entitlements already. Do you want cross-device sync, or is this single-device only? (Single-device is simpler to build and test.)
-
-6. **Starting point** — I'm planning to start with Phase 1 (data models + settings). Does that sequencing make sense, or would you rather see the data entry UI first and configure trackers later?
+Once water tracking is solid:
+1. Generalize `WaterEntry` → generic `TrackerEntry` + `TrackerDefinition`
+2. Add more tracker types (medications, exercise, etc.)
+3. Apple Health integration
+4. Cross-tracker analysis and correlations
+5. Notifications/reminders
+6. Widgets
 
 	
