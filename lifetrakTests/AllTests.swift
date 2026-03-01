@@ -275,13 +275,200 @@ struct AllTests {
         #expect(vm.servingSize == 16.0)
     }
 
+    // MARK: - HistoryViewModel: Initial state
+
+    @Test func history_initiallyEmpty() throws {
+        let (hvm, _) = try makeHistoryVM()
+        #expect(hvm.daySummaries.isEmpty)
+    }
+
+    // MARK: - HistoryViewModel: Day summaries
+
+    @Test func history_groupsByDay() throws {
+        let container = try TestHelpers.makeContainer()
+        let context = container.mainContext
+
+        // Today: 2 entries
+        context.insert(WaterEntry(amount: 8.0))
+        context.insert(WaterEntry(amount: 12.0))
+        // Yesterday: 1 entry
+        let yesterday = Calendar.current.date(byAdding: .day, value: -1, to: .now)!
+        context.insert(WaterEntry(timestamp: yesterday, amount: 16.0))
+        try context.save()
+
+        let hvm = HistoryViewModel(modelContext: context)
+        hvm.refresh()
+        #expect(hvm.daySummaries.count == 2)
+    }
+
+    @Test func history_daySummaryTotal() throws {
+        let container = try TestHelpers.makeContainer()
+        let context = container.mainContext
+
+        context.insert(WaterEntry(amount: 8.0))
+        context.insert(WaterEntry(amount: 12.0))
+        context.insert(WaterEntry(amount: 4.0))
+        try context.save()
+
+        let hvm = HistoryViewModel(modelContext: context)
+        hvm.refresh()
+        #expect(hvm.daySummaries.count == 1)
+        #expect(hvm.daySummaries.first?.total == 24.0)
+    }
+
+    @Test func history_daySummariesSortedNewestFirst() throws {
+        let container = try TestHelpers.makeContainer()
+        let context = container.mainContext
+
+        let threeDaysAgo = Calendar.current.date(byAdding: .day, value: -3, to: .now)!
+        let yesterday = Calendar.current.date(byAdding: .day, value: -1, to: .now)!
+        context.insert(WaterEntry(timestamp: threeDaysAgo, amount: 8.0))
+        context.insert(WaterEntry(amount: 12.0)) // today
+        context.insert(WaterEntry(timestamp: yesterday, amount: 16.0))
+        try context.save()
+
+        let hvm = HistoryViewModel(modelContext: context)
+        hvm.refresh()
+        #expect(hvm.daySummaries.count == 3)
+        // Newest first
+        let dates = hvm.daySummaries.map(\.date)
+        #expect(dates[0] > dates[1])
+        #expect(dates[1] > dates[2])
+    }
+
+    @Test func history_daySummaryEntriesSortedNewestFirst() throws {
+        let container = try TestHelpers.makeContainer()
+        let context = container.mainContext
+
+        let cal = Calendar.current
+        let today = cal.startOfDay(for: .now)
+        let morning = cal.date(byAdding: .hour, value: 8, to: today)!
+        let afternoon = cal.date(byAdding: .hour, value: 14, to: today)!
+        let evening = cal.date(byAdding: .hour, value: 20, to: today)!
+
+        context.insert(WaterEntry(timestamp: afternoon, amount: 12.0))
+        context.insert(WaterEntry(timestamp: morning, amount: 8.0))
+        context.insert(WaterEntry(timestamp: evening, amount: 16.0))
+        try context.save()
+
+        let hvm = HistoryViewModel(modelContext: context)
+        hvm.refresh()
+        let entries = hvm.daySummaries.first!.entries
+        #expect(entries.count == 3)
+        // Newest first within day
+        #expect(entries[0].timestamp >= entries[1].timestamp)
+        #expect(entries[1].timestamp >= entries[2].timestamp)
+    }
+
+    @Test func history_daySummaryEntryCount() throws {
+        let container = try TestHelpers.makeContainer()
+        let context = container.mainContext
+
+        context.insert(WaterEntry(amount: 8.0))
+        context.insert(WaterEntry(amount: 12.0))
+        try context.save()
+
+        let hvm = HistoryViewModel(modelContext: context)
+        hvm.refresh()
+        #expect(hvm.daySummaries.first?.entries.count == 2)
+    }
+
+    // MARK: - HistoryViewModel: Add entry
+
+    @Test func history_addEntry() throws {
+        let (hvm, _keepAlive) = try makeHistoryVM()
+        let date = Calendar.current.date(byAdding: .day, value: -2, to: .now)!
+        hvm.addEntry(amount: 16.0, timestamp: date)
+        hvm.refresh()
+        #expect(hvm.daySummaries.count == 1)
+        #expect(hvm.daySummaries.first?.total == 16.0)
+        _ = _keepAlive
+    }
+
+    @Test func history_addEntryDefaultsToNow() throws {
+        let (hvm, _keepAlive) = try makeHistoryVM()
+        let before = Date.now
+        hvm.addEntry(amount: 8.0)
+        let after = Date.now
+        hvm.refresh()
+        let entry = hvm.daySummaries.first?.entries.first
+        #expect(entry != nil)
+        #expect(entry!.timestamp >= before)
+        #expect(entry!.timestamp <= after)
+        _ = _keepAlive
+    }
+
+    // MARK: - HistoryViewModel: Delete entry
+
+    @Test func history_deleteEntry() throws {
+        let (hvm, _keepAlive) = try makeHistoryVM()
+        hvm.addEntry(amount: 8.0)
+        hvm.addEntry(amount: 12.0)
+        hvm.refresh()
+        #expect(hvm.daySummaries.first?.entries.count == 2)
+
+        let entry = hvm.daySummaries.first!.entries.first!
+        hvm.deleteEntry(entry)
+        hvm.refresh()
+        #expect(hvm.daySummaries.first?.entries.count == 1)
+        _ = _keepAlive
+    }
+
+    @Test func history_deleteLastEntryRemovesDay() throws {
+        let (hvm, _keepAlive) = try makeHistoryVM()
+        hvm.addEntry(amount: 8.0)
+        hvm.refresh()
+
+        let entry = hvm.daySummaries.first!.entries.first!
+        hvm.deleteEntry(entry)
+        hvm.refresh()
+        #expect(hvm.daySummaries.isEmpty)
+        _ = _keepAlive
+    }
+
+    // MARK: - HistoryViewModel: Update entry
+
+    @Test func history_updateEntryAmount() throws {
+        let (hvm, _keepAlive) = try makeHistoryVM()
+        hvm.addEntry(amount: 8.0)
+        hvm.refresh()
+
+        let entry = hvm.daySummaries.first!.entries.first!
+        hvm.updateEntry(entry, amount: 16.0)
+        hvm.refresh()
+        #expect(hvm.daySummaries.first?.total == 16.0)
+        _ = _keepAlive
+    }
+
+    @Test func history_updateEntryTimestamp() throws {
+        let (hvm, _keepAlive) = try makeHistoryVM()
+        hvm.addEntry(amount: 8.0)
+        hvm.refresh()
+
+        let entry = hvm.daySummaries.first!.entries.first!
+        let yesterday = Calendar.current.date(byAdding: .day, value: -1, to: .now)!
+        hvm.updateEntry(entry, timestamp: yesterday)
+        hvm.refresh()
+        // Entry moved to a different day, so now we have 1 summary for yesterday
+        #expect(hvm.daySummaries.count == 1)
+        #expect(hvm.daySummaries.first?.entries.first?.timestamp == yesterday)
+        _ = _keepAlive
+    }
+
     // MARK: - Helpers
 
-    /// Returns (ViewModel, ModelContainer). The container MUST be kept alive
+    /// Returns (TodayViewModel, ModelContainer). The container MUST be kept alive
     /// for the test's duration — ModelContext holds a weak reference to it.
     private func makeVM() throws -> (TodayViewModel, ModelContainer) {
         let container = try TestHelpers.makeContainer()
         let vm = TodayViewModel(modelContext: container.mainContext, defaults: TestHelpers.makeDefaults())
         return (vm, container)
+    }
+
+    /// Returns (HistoryViewModel, ModelContainer). The container MUST be kept alive.
+    private func makeHistoryVM() throws -> (HistoryViewModel, ModelContainer) {
+        let container = try TestHelpers.makeContainer()
+        let hvm = HistoryViewModel(modelContext: container.mainContext)
+        return (hvm, container)
     }
 }
