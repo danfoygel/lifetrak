@@ -13,18 +13,18 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Select Xcode
-        run: sudo xcode-select -s /Applications/Xcode_16.app/Contents/Developer
-
-      - name: Create iPhone 14 Simulator
         run: |
-          RUNTIME=$(xcrun simctl list runtimes | grep "iOS 18" | tail -1 | awk '{print $NF}')
-          echo "Using runtime: $RUNTIME"
-          xcrun simctl create "iPhone 14" \
-            "com.apple.CoreSimulator.SimDeviceType.iPhone-14" \
-            "$RUNTIME"
+          # Find the latest Xcode that supports iOS 26 (the project's deployment target)
+          XCODE_PATH=$(ls -d /Applications/Xcode*.app 2>/dev/null | sort -V | tail -1)
+          echo "Using: $XCODE_PATH"
+          sudo xcode-select -s "$XCODE_PATH/Contents/Developer"
+          xcodebuild -version
+
+      - name: List available simulators
+        run: xcrun simctl list devices available
 
       - name: Build
-        run: xcodebuild -scheme lifetrak -destination 'platform=iOS Simulator,name=iPhone 14' build
+        run: xcodebuild -scheme lifetrak -destination 'platform=iOS Simulator,name=iPhone 16 Pro' build
 
       - name: Test
-        run: xcodebuild -scheme lifetrak -destination 'platform=iOS Simulator,name=iPhone 14' -only-testing:lifetrakTests test
+        run: xcodebuild -scheme lifetrak -destination 'platform=iOS Simulator,name=iPhone 16 Pro' -only-testing:lifetrakTests test
