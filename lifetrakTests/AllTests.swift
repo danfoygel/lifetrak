@@ -455,6 +455,122 @@ struct AllTests {
         _ = _keepAlive
     }
 
+    // MARK: - TodayViewModel: Weekly data
+
+    @Test func vm_weeklyDataHasSevenDays() throws {
+        let (vm, _) = try makeVM()
+        #expect(vm.weeklyData.count == 7)
+    }
+
+    @Test func vm_weeklyDataIncludesToday() throws {
+        let (vm, _keepAlive) = try makeVM()
+        vm.logWater()
+        #expect(vm.weeklyData.last?.total == 8.0)
+        _ = _keepAlive
+    }
+
+    @Test func vm_weeklyDataIncludesPastDays() throws {
+        let container = try TestHelpers.makeContainer()
+        let context = container.mainContext
+
+        // Add entries for yesterday and 2 days ago
+        let yesterday = Calendar.current.date(byAdding: .day, value: -1, to: .now)!
+        let twoDaysAgo = Calendar.current.date(byAdding: .day, value: -2, to: .now)!
+        context.insert(WaterEntry(timestamp: yesterday, amount: 32.0))
+        context.insert(WaterEntry(timestamp: twoDaysAgo, amount: 16.0))
+        try context.save()
+
+        let vm = TodayViewModel(modelContext: context, defaults: TestHelpers.makeDefaults())
+        // weeklyData is sorted oldest→newest (for chart display)
+        // Last entry = today (0), second-to-last = yesterday (32), third-to-last = 2 days ago (16)
+        #expect(vm.weeklyData[vm.weeklyData.count - 1].total == 0.0)  // today
+        #expect(vm.weeklyData[vm.weeklyData.count - 2].total == 32.0) // yesterday
+        #expect(vm.weeklyData[vm.weeklyData.count - 3].total == 16.0) // 2 days ago
+    }
+
+    @Test func vm_weeklyDataExcludesOlderThan7Days() throws {
+        let container = try TestHelpers.makeContainer()
+        let context = container.mainContext
+
+        let eightDaysAgo = Calendar.current.date(byAdding: .day, value: -8, to: .now)!
+        context.insert(WaterEntry(timestamp: eightDaysAgo, amount: 99.0))
+        try context.save()
+
+        let vm = TodayViewModel(modelContext: context, defaults: TestHelpers.makeDefaults())
+        let totalAcrossWeek = vm.weeklyData.reduce(0.0) { $0 + $1.total }
+        #expect(totalAcrossWeek == 0.0)
+    }
+
+    // MARK: - TodayViewModel: Streak
+
+    @Test func vm_streakZeroWhenNoEntries() throws {
+        let (vm, _) = try makeVM()
+        #expect(vm.currentStreak == 0)
+    }
+
+    @Test func vm_streakOneWhenGoalMetToday() throws {
+        let (vm, _keepAlive) = try makeVM()
+        for _ in 0..<8 { vm.logWater() } // 8 × 8 = 64 oz = goal
+        #expect(vm.currentStreak == 1)
+        _ = _keepAlive
+    }
+
+    @Test func vm_streakCountsConsecutiveDays() throws {
+        let container = try TestHelpers.makeContainer()
+        let context = container.mainContext
+
+        let cal = Calendar.current
+        // Today: meet goal
+        context.insert(WaterEntry(amount: 64.0))
+        // Yesterday: meet goal
+        let yesterday = cal.date(byAdding: .day, value: -1, to: .now)!
+        context.insert(WaterEntry(timestamp: yesterday, amount: 64.0))
+        // 2 days ago: meet goal
+        let twoDaysAgo = cal.date(byAdding: .day, value: -2, to: .now)!
+        context.insert(WaterEntry(timestamp: twoDaysAgo, amount: 64.0))
+        try context.save()
+
+        let vm = TodayViewModel(modelContext: context, defaults: TestHelpers.makeDefaults())
+        #expect(vm.currentStreak == 3)
+    }
+
+    @Test func vm_streakBreaksOnMissedDay() throws {
+        let container = try TestHelpers.makeContainer()
+        let context = container.mainContext
+
+        let cal = Calendar.current
+        // Today: meet goal
+        context.insert(WaterEntry(amount: 64.0))
+        // Yesterday: missed (no entries)
+        // 2 days ago: meet goal
+        let twoDaysAgo = cal.date(byAdding: .day, value: -2, to: .now)!
+        context.insert(WaterEntry(timestamp: twoDaysAgo, amount: 64.0))
+        try context.save()
+
+        let vm = TodayViewModel(modelContext: context, defaults: TestHelpers.makeDefaults())
+        #expect(vm.currentStreak == 1) // only today counts
+    }
+
+    @Test func vm_streakStartsFromYesterdayIfTodayNotMet() throws {
+        let container = try TestHelpers.makeContainer()
+        let context = container.mainContext
+
+        let cal = Calendar.current
+        // Today: not met (only 8 oz)
+        context.insert(WaterEntry(amount: 8.0))
+        // Yesterday: met
+        let yesterday = cal.date(byAdding: .day, value: -1, to: .now)!
+        context.insert(WaterEntry(timestamp: yesterday, amount: 64.0))
+        // 2 days ago: met
+        let twoDaysAgo = cal.date(byAdding: .day, value: -2, to: .now)!
+        context.insert(WaterEntry(timestamp: twoDaysAgo, amount: 64.0))
+        try context.save()
+
+        let vm = TodayViewModel(modelContext: context, defaults: TestHelpers.makeDefaults())
+        // Today not met, but yesterday and day before were — streak = 2
+        #expect(vm.currentStreak == 2)
+    }
+
     // MARK: - Helpers
 
     /// Returns (TodayViewModel, ModelContainer). The container MUST be kept alive
