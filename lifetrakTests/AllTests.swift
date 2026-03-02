@@ -971,7 +971,7 @@ struct AllTests {
         ]
         let result = SleepAggregator.aggregate(samples)
         #expect(result.count == 1)
-        #expect(result.first?.totalSleepDuration == 8 * 3600)
+        #expect(result.first?.totalSleepDuration == 28800.0)
     }
 
     @Test func aggregator_assignsToWakeUpDay() {
@@ -1019,7 +1019,7 @@ struct AllTests {
             RawSleepSample(startDate: date(2026, 3, 1, 23, 0), endDate: date(2026, 3, 2, 7, 0), category: .asleepUnspecified),
         ]
         let result = SleepAggregator.aggregate(samples)
-        #expect(result.first?.totalSleepDuration == 8 * 3600)
+        #expect(result.first?.totalSleepDuration == 28800.0)
     }
 
     @Test func aggregator_filtersOutNaps() {
