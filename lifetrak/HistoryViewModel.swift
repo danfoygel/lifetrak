@@ -1,14 +1,14 @@
 import Foundation
 import SwiftData
 
-/// A single day's worth of water entries and optional sleep data.
+/// A single day's worth of water events and optional sleep data.
 struct DaySummary: Identifiable {
     let date: Date          // start of day
-    let entries: [WaterEntry]
+    let entries: [Event]
     let sleepNight: SleepNight?
 
     var id: Date { date }
-    var total: Double { entries.reduce(0.0) { $0 + $1.amount } }
+    var total: Double { entries.reduce(0.0) { $0 + ($1.quantity ?? 0) } }
 }
 
 @MainActor
@@ -21,32 +21,35 @@ final class HistoryViewModel {
     var healthAuthStatus: HealthAuthStatus = .notRequested
 
     // Internal storage for merging two data sources
-    private var waterByDay: [Date: [WaterEntry]] = [:]
+    private var waterByDay: [Date: [Event]] = [:]
     private var sleepByDay: [Date: SleepNight] = [:]
+    private var waterActivity: Activity?
 
     init(modelContext: ModelContext, healthService: (any HealthKitServiceProtocol)? = nil) {
         self.modelContext = modelContext
         self.healthService = healthService
+        fetchWaterActivity()
         refresh()
     }
 
     // MARK: - Actions
 
     func addEntry(amount: Double, timestamp: Date = .now) {
-        let entry = WaterEntry(timestamp: timestamp, amount: amount)
-        modelContext.insert(entry)
+        guard let activity = waterActivity else { return }
+        let event = Event(activity: activity, timestamp: timestamp, quantity: amount)
+        modelContext.insert(event)
         try? modelContext.save()
         refresh()
     }
 
-    func deleteEntry(_ entry: WaterEntry) {
+    func deleteEntry(_ entry: Event) {
         modelContext.delete(entry)
         try? modelContext.save()
         refresh()
     }
 
-    func updateEntry(_ entry: WaterEntry, amount: Double? = nil, timestamp: Date? = nil) {
-        if let amount { entry.amount = amount }
+    func updateEntry(_ entry: Event, amount: Double? = nil, timestamp: Date? = nil) {
+        if let amount { entry.quantity = amount }
         if let timestamp { entry.timestamp = timestamp }
         try? modelContext.save()
         refresh()
@@ -79,15 +82,26 @@ final class HistoryViewModel {
 
     // MARK: - Private
 
+    private func fetchWaterActivity() {
+        let descriptor = FetchDescriptor<Activity>(
+            predicate: #Predicate<Activity> { $0.name == "Drink Water" }
+        )
+        waterActivity = try? modelContext.fetch(descriptor).first
+    }
+
     private func refreshWater() {
-        var descriptor = FetchDescriptor<WaterEntry>()
+        fetchWaterActivity()
+
+        var descriptor = FetchDescriptor<Event>()
         descriptor.sortBy = [SortDescriptor(\.timestamp, order: .reverse)]
 
-        let allEntries = (try? modelContext.fetch(descriptor)) ?? []
+        let allEvents = (try? modelContext.fetch(descriptor)) ?? []
+        let waterID = waterActivity?.persistentModelID
+        let waterEvents = allEvents.filter { $0.activity?.persistentModelID == waterID }
 
         let calendar = Calendar.current
-        waterByDay = Dictionary(grouping: allEntries) { entry in
-            calendar.startOfDay(for: entry.timestamp)
+        waterByDay = Dictionary(grouping: waterEvents) { event in
+            calendar.startOfDay(for: event.timestamp)
         }
     }
 

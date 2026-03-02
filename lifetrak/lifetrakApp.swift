@@ -12,6 +12,11 @@ import SwiftData
 struct lifetrakApp: App {
     var sharedModelContainer: ModelContainer = {
         let schema = Schema([
+            Activity.self,
+            Event.self,
+            Routine.self,
+            Goal.self,
+            RoutineSchedule.self,
             WaterEntry.self,
         ])
         let modelConfiguration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: false)

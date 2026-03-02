@@ -9,7 +9,1240 @@ import SwiftData
 @Suite(.serialized)
 struct AllTests {
 
-    // MARK: - WaterEntry: Creation
+    // =========================================================================
+    // MARK: - Activity Model
+    // =========================================================================
+
+    @Test func activity_create() throws {
+        let container = try TestHelpers.makeContainer()
+        let context = container.mainContext
+
+        let activity = Activity(name: "Drink Water", emoji: "\u{1F4A7}", quantityUnit: "oz")
+        context.insert(activity)
+        try context.save()
+
+        let activities = try context.fetch(FetchDescriptor<Activity>())
+        #expect(activities.count == 1)
+        #expect(activities.first?.name == "Drink Water")
+        #expect(activities.first?.emoji == "\u{1F4A7}")
+        #expect(activities.first?.quantityUnit == "oz")
+    }
+
+    @Test func activity_defaults() throws {
+        let activity = Activity(name: "Test", emoji: "T")
+        #expect(activity.quantityUnit == nil)
+        #expect(activity.tracksDuration == false)
+        #expect(activity.defaultQuantity == nil)
+        #expect(activity.sortOrder == 0)
+    }
+
+    @Test func activity_dataSourceManual() throws {
+        let activity = Activity(name: "Water", emoji: "W", source: .manual)
+        #expect(activity.source == .manual)
+    }
+
+    @Test func activity_dataSourceHealthKit() throws {
+        let activity = Activity(name: "Sleep", emoji: "S", source: .healthKit("sleepAnalysis"))
+        #expect(activity.source == .healthKit("sleepAnalysis"))
+    }
+
+    @Test func activity_withDuration() throws {
+        let activity = Activity(name: "Meditation", emoji: "M", tracksDuration: true)
+        #expect(activity.tracksDuration == true)
+    }
+
+    // =========================================================================
+    // MARK: - Event Model
+    // =========================================================================
+
+    @Test func event_create() throws {
+        let container = try TestHelpers.makeContainer()
+        let context = container.mainContext
+
+        let activity = TestHelpers.makeWaterActivity(context: context)
+        let event = Event(activity: activity, quantity: 8.0)
+        context.insert(event)
+        try context.save()
+
+        let events = try context.fetch(FetchDescriptor<Event>())
+        #expect(events.count == 1)
+        #expect(events.first?.quantity == 8.0)
+        #expect(events.first?.activity?.name == "Drink Water")
+    }
+
+    @Test func event_createWithCustomTimestamp() throws {
+        let container = try TestHelpers.makeContainer()
+        let context = container.mainContext
+
+        let activity = TestHelpers.makeWaterActivity(context: context)
+        let date = Date(timeIntervalSince1970: 1_000_000)
+        let event = Event(activity: activity, timestamp: date, quantity: 12.0)
+        context.insert(event)
+        try context.save()
+
+        let events = try context.fetch(FetchDescriptor<Event>())
+        #expect(events.first?.timestamp == date)
+        #expect(events.first?.quantity == 12.0)
+    }
+
+    @Test func event_defaultTimestampIsNow() throws {
+        let container = try TestHelpers.makeContainer()
+        let context = container.mainContext
+
+        let activity = TestHelpers.makeWaterActivity(context: context)
+        let before = Date.now
+        let event = Event(activity: activity, quantity: 8.0)
+        let after = Date.now
+        #expect(event.timestamp >= before)
+        #expect(event.timestamp <= after)
+    }
+
+    @Test func event_delete() throws {
+        let container = try TestHelpers.makeContainer()
+        let context = container.mainContext
+
+        let activity = TestHelpers.makeWaterActivity(context: context)
+        let event = Event(activity: activity, quantity: 8.0)
+        context.insert(event)
+        try context.save()
+        context.delete(event)
+        try context.save()
+
+        let events = try context.fetch(FetchDescriptor<Event>())
+        #expect(events.isEmpty)
+    }
+
+    @Test func event_durationComputed() throws {
+        let container = try TestHelpers.makeContainer()
+        let context = container.mainContext
+
+        let activity = Activity(name: "Meditation", emoji: "M", tracksDuration: true, source: .manual)
+        context.insert(activity)
+
+        let start = Date(timeIntervalSince1970: 1000)
+        let end = Date(timeIntervalSince1970: 2200) // 1200 seconds = 20 min
+        let event = Event(activity: activity, timestamp: start, endTimestamp: end)
+        context.insert(event)
+
+        #expect(event.duration == 1200)
+    }
+
+    @Test func event_durationNilWithoutEndTimestamp() throws {
+        let container = try TestHelpers.makeContainer()
+        let context = container.mainContext
+
+        let activity = TestHelpers.makeWaterActivity(context: context)
+        let event = Event(activity: activity, quantity: 8.0)
+        context.insert(event)
+
+        #expect(event.duration == nil)
+    }
+
+    @Test func event_fetchToday() throws {
+        let container = try TestHelpers.makeContainer()
+        let context = container.mainContext
+
+        let activity = TestHelpers.makeWaterActivity(context: context)
+        context.insert(Event(activity: activity, quantity: 8.0))
+        let yesterday = Calendar.current.date(byAdding: .day, value: -1, to: .now)!
+        context.insert(Event(activity: activity, timestamp: yesterday, quantity: 16.0))
+        try context.save()
+
+        let startOfDay = Calendar.current.startOfDay(for: .now)
+        let tomorrow = Calendar.current.date(byAdding: .day, value: 1, to: startOfDay)!
+        let descriptor = FetchDescriptor<Event>(
+            predicate: #Predicate<Event> { $0.timestamp >= startOfDay && $0.timestamp < tomorrow }
+        )
+
+        let todayEvents = try context.fetch(descriptor)
+        #expect(todayEvents.count == 1)
+        #expect(todayEvents.first?.quantity == 8.0)
+    }
+
+    @Test func event_sumToday() throws {
+        let container = try TestHelpers.makeContainer()
+        let context = container.mainContext
+
+        let activity = TestHelpers.makeWaterActivity(context: context)
+        context.insert(Event(activity: activity, quantity: 8.0))
+        context.insert(Event(activity: activity, quantity: 12.0))
+        context.insert(Event(activity: activity, quantity: 8.0))
+        let yesterday = Calendar.current.date(byAdding: .day, value: -1, to: .now)!
+        context.insert(Event(activity: activity, timestamp: yesterday, quantity: 99.0))
+        try context.save()
+
+        let startOfDay = Calendar.current.startOfDay(for: .now)
+        let tomorrow = Calendar.current.date(byAdding: .day, value: 1, to: startOfDay)!
+        let descriptor = FetchDescriptor<Event>(
+            predicate: #Predicate<Event> { $0.timestamp >= startOfDay && $0.timestamp < tomorrow }
+        )
+
+        let todayEvents = try context.fetch(descriptor)
+        let total = todayEvents.reduce(0.0) { $0 + ($1.quantity ?? 0) }
+        #expect(total == 28.0)
+    }
+
+    @Test func event_multiplePersist() throws {
+        let container = try TestHelpers.makeContainer()
+        let context = container.mainContext
+
+        let activity = TestHelpers.makeWaterActivity(context: context)
+        for amount in [8.0, 16.0, 12.0, 8.0, 24.0] {
+            context.insert(Event(activity: activity, quantity: amount))
+        }
+        try context.save()
+
+        let events = try context.fetch(FetchDescriptor<Event>())
+        #expect(events.count == 5)
+    }
+
+    @Test func event_update() throws {
+        let container = try TestHelpers.makeContainer()
+        let context = container.mainContext
+
+        let activity = TestHelpers.makeWaterActivity(context: context)
+        let event = Event(activity: activity, quantity: 8.0)
+        context.insert(event)
+        try context.save()
+
+        event.quantity = 16.0
+        try context.save()
+
+        let events = try context.fetch(FetchDescriptor<Event>())
+        #expect(events.first?.quantity == 16.0)
+    }
+
+    // =========================================================================
+    // MARK: - Routine & Goal Model
+    // =========================================================================
+
+    @Test func routine_create() throws {
+        let container = try TestHelpers.makeContainer()
+        let context = container.mainContext
+
+        let routine = Routine(name: "Standard", isDefault: true)
+        context.insert(routine)
+        try context.save()
+
+        let routines = try context.fetch(FetchDescriptor<Routine>())
+        #expect(routines.count == 1)
+        #expect(routines.first?.name == "Standard")
+        #expect(routines.first?.isDefault == true)
+        #expect(routines.first?.isSnapshot == false)
+    }
+
+    @Test func routine_withGoals() throws {
+        let container = try TestHelpers.makeContainer()
+        let context = container.mainContext
+
+        let activity = TestHelpers.makeWaterActivity(context: context)
+        let routine = Routine(name: "Standard", isDefault: true)
+        context.insert(routine)
+
+        let goal = Goal(routine: routine, activity: activity, period: .daily, targetQuantity: 64.0)
+        context.insert(goal)
+        try context.save()
+
+        let routines = try context.fetch(FetchDescriptor<Routine>())
+        #expect(routines.first?.goals.count == 1)
+        #expect(routines.first?.goals.first?.targetQuantity == 64.0)
+        #expect(routines.first?.goals.first?.period == .daily)
+    }
+
+    @Test func goal_frequencyTarget() throws {
+        let container = try TestHelpers.makeContainer()
+        let context = container.mainContext
+
+        let activity = Activity(name: "Bright Light", emoji: "S", tracksDuration: true, source: .manual)
+        context.insert(activity)
+        let routine = Routine(name: "Standard", isDefault: true)
+        context.insert(routine)
+
+        let goal = Goal(
+            routine: routine,
+            activity: activity,
+            period: .weekly,
+            targetDuration: 1200,
+            targetFrequency: 5
+        )
+        context.insert(goal)
+        try context.save()
+
+        #expect(goal.targetDuration == 1200)
+        #expect(goal.targetFrequency == 5)
+        #expect(goal.period == .weekly)
+        #expect(goal.targetQuantity == nil)
+    }
+
+    @Test func routine_createSnapshot() throws {
+        let container = try TestHelpers.makeContainer()
+        let context = container.mainContext
+
+        let activity = TestHelpers.makeWaterActivity(context: context)
+        let routine = Routine(name: "Travel", isDefault: false)
+        context.insert(routine)
+
+        let goal = Goal(routine: routine, activity: activity, period: .daily, targetQuantity: 48.0)
+        context.insert(goal)
+        try context.save()
+
+        let snapshot = routine.createSnapshot()
+        context.insert(snapshot)
+        try context.save()
+
+        #expect(snapshot.name == "Travel")
+        #expect(snapshot.isSnapshot == true)
+        #expect(snapshot.isDefault == false)
+        #expect(snapshot.goals.count == 1)
+        #expect(snapshot.goals.first?.targetQuantity == 48.0)
+        #expect(snapshot.goals.first?.activity?.name == "Drink Water")
+
+        // Original and snapshot are independent
+        routine.goals.first?.targetQuantity = 32.0
+        #expect(snapshot.goals.first?.targetQuantity == 48.0)
+    }
+
+    // =========================================================================
+    // MARK: - RoutineSchedule Model
+    // =========================================================================
+
+    @Test func routineSchedule_create() throws {
+        let container = try TestHelpers.makeContainer()
+        let context = container.mainContext
+
+        let routine = Routine(name: "Travel", isDefault: false)
+        context.insert(routine)
+
+        let start = Calendar.current.date(from: DateComponents(year: 2026, month: 5, day: 1))!
+        let end = Calendar.current.date(from: DateComponents(year: 2026, month: 5, day: 5))!
+        let schedule = RoutineSchedule(routine: routine, startDate: start, endDate: end)
+        context.insert(schedule)
+        try context.save()
+
+        let schedules = try context.fetch(FetchDescriptor<RoutineSchedule>())
+        #expect(schedules.count == 1)
+        #expect(schedules.first?.routine?.name == "Travel")
+    }
+
+    @Test func routineSchedule_resolvesForDate() throws {
+        let container = try TestHelpers.makeContainer()
+        let context = container.mainContext
+
+        let defaultRoutine = Routine(name: "Standard", isDefault: true)
+        let travelRoutine = Routine(name: "Travel", isDefault: false)
+        context.insert(defaultRoutine)
+        context.insert(travelRoutine)
+
+        let start = Calendar.current.date(from: DateComponents(year: 2026, month: 5, day: 1))!
+        let end = Calendar.current.date(from: DateComponents(year: 2026, month: 5, day: 5))!
+        let schedule = RoutineSchedule(routine: travelRoutine, startDate: start, endDate: end)
+        context.insert(schedule)
+        try context.save()
+
+        // May 3 should resolve to Travel
+        let may3 = Calendar.current.date(from: DateComponents(year: 2026, month: 5, day: 3))!
+        let scheduleDescriptor = FetchDescriptor<RoutineSchedule>(
+            predicate: #Predicate<RoutineSchedule> { s in
+                s.startDate <= may3 && s.endDate >= may3
+            }
+        )
+        let matches = try context.fetch(scheduleDescriptor)
+        #expect(matches.count == 1)
+        #expect(matches.first?.routine?.name == "Travel")
+
+        // May 10 should have no schedule (falls back to default)
+        let may10 = Calendar.current.date(from: DateComponents(year: 2026, month: 5, day: 10))!
+        let noMatchDescriptor = FetchDescriptor<RoutineSchedule>(
+            predicate: #Predicate<RoutineSchedule> { s in
+                s.startDate <= may10 && s.endDate >= may10
+            }
+        )
+        let noMatches = try context.fetch(noMatchDescriptor)
+        #expect(noMatches.isEmpty)
+    }
+
+    // =========================================================================
+    // MARK: - TodayViewModel: Basic
+    // =========================================================================
+
+    @Test func todayVM_initialState() throws {
+        let container = try TestHelpers.makeContainer()
+        let vm = TodayViewModel(modelContext: container.mainContext)
+
+        #expect(vm.todayTotal == 0.0)
+        #expect(vm.progress == 0.0)
+        #expect(vm.goalMet == false)
+        #expect(vm.todayEntries.isEmpty)
+    }
+
+    @Test func todayVM_autoCreatesDefaults() throws {
+        let container = try TestHelpers.makeContainer()
+        let vm = TodayViewModel(modelContext: container.mainContext)
+
+        #expect(vm.waterActivity != nil)
+        #expect(vm.waterActivity?.name == "Drink Water")
+        #expect(vm.activeRoutine != nil)
+        #expect(vm.activeRoutine?.name == "Standard")
+        #expect(vm.dailyGoal == 64.0)
+        #expect(vm.servingSize == 8.0)
+    }
+
+    @Test func todayVM_logWater() throws {
+        let container = try TestHelpers.makeContainer()
+        let vm = TodayViewModel(modelContext: container.mainContext)
+
+        vm.logWater()
+
+        #expect(vm.todayEntries.count == 1)
+        #expect(vm.todayTotal == 8.0)
+    }
+
+    @Test func todayVM_logWaterMultiple() throws {
+        let container = try TestHelpers.makeContainer()
+        let vm = TodayViewModel(modelContext: container.mainContext)
+
+        vm.logWater()
+        vm.logWater()
+        vm.logWater()
+
+        #expect(vm.todayEntries.count == 3)
+        #expect(vm.todayTotal == 24.0)
+    }
+
+    @Test func todayVM_progress() throws {
+        let container = try TestHelpers.makeContainer()
+        let vm = TodayViewModel(modelContext: container.mainContext)
+
+        // Default: 8 oz serving, 64 oz goal
+        vm.logWater() // 8/64 = 0.125
+        #expect(vm.progress == 0.125)
+    }
+
+    @Test func todayVM_progressCapsAtOne() throws {
+        let container = try TestHelpers.makeContainer()
+        let vm = TodayViewModel(modelContext: container.mainContext)
+
+        // Log 9 servings = 72 oz, goal is 64
+        for _ in 0..<9 {
+            vm.logWater()
+        }
+        #expect(vm.progress == 1.0)
+        #expect(vm.todayTotal == 72.0)
+    }
+
+    @Test func todayVM_goalMet() throws {
+        let container = try TestHelpers.makeContainer()
+        let vm = TodayViewModel(modelContext: container.mainContext)
+
+        // Log 8 servings = 64 oz = goal
+        for _ in 0..<8 {
+            vm.logWater()
+        }
+        #expect(vm.goalMet == true)
+    }
+
+    @Test func todayVM_excludesYesterday() throws {
+        let container = try TestHelpers.makeContainer()
+        let context = container.mainContext
+
+        let activity = TestHelpers.makeWaterActivity(context: context)
+        TestHelpers.makeDefaultRoutine(context: context, waterActivity: activity)
+
+        let yesterday = Calendar.current.date(byAdding: .day, value: -1, to: .now)!
+        let event = Event(activity: activity, timestamp: yesterday, quantity: 99.0)
+        context.insert(event)
+        try context.save()
+
+        let vm = TodayViewModel(modelContext: context)
+        #expect(vm.todayTotal == 0.0)
+        #expect(vm.todayEntries.isEmpty)
+    }
+
+    @Test func todayVM_customDailyGoal() throws {
+        let container = try TestHelpers.makeContainer()
+        let vm = TodayViewModel(modelContext: container.mainContext)
+
+        vm.updateDailyGoal(100.0)
+        #expect(vm.dailyGoal == 100.0)
+
+        vm.logWater() // 8 oz
+        #expect(vm.progress == 0.08) // 8/100
+    }
+
+    @Test func todayVM_customServingSize() throws {
+        let container = try TestHelpers.makeContainer()
+        let vm = TodayViewModel(modelContext: container.mainContext)
+
+        vm.updateServingSize(16.0)
+        #expect(vm.servingSize == 16.0)
+
+        vm.logWater()
+        #expect(vm.todayTotal == 16.0)
+    }
+
+    @Test func todayVM_displayString() throws {
+        let container = try TestHelpers.makeContainer()
+        let vm = TodayViewModel(modelContext: container.mainContext)
+
+        #expect(vm.todayTotalDisplay == "0")
+        vm.logWater()
+        #expect(vm.todayTotalDisplay == "8")
+    }
+
+    @Test func todayVM_dailyGoalDisplay() throws {
+        let container = try TestHelpers.makeContainer()
+        let vm = TodayViewModel(modelContext: container.mainContext)
+
+        #expect(vm.dailyGoalDisplay == "64")
+    }
+
+    @Test func todayVM_progressZeroWhenGoalIsZero() throws {
+        let container = try TestHelpers.makeContainer()
+        let vm = TodayViewModel(modelContext: container.mainContext)
+
+        vm.updateDailyGoal(0)
+        vm.logWater()
+        #expect(vm.progress == 0.0)
+    }
+
+    // =========================================================================
+    // MARK: - TodayViewModel: Weekly Data
+    // =========================================================================
+
+    @Test func todayVM_weeklyDataAlwaysSeven() throws {
+        let container = try TestHelpers.makeContainer()
+        let vm = TodayViewModel(modelContext: container.mainContext)
+
+        #expect(vm.weeklyData.count == 7)
+    }
+
+    @Test func todayVM_weeklyDataIncludesToday() throws {
+        let container = try TestHelpers.makeContainer()
+        let vm = TodayViewModel(modelContext: container.mainContext)
+
+        vm.logWater()
+
+        let today = Calendar.current.startOfDay(for: .now)
+        let todayData = vm.weeklyData.first { Calendar.current.isDate($0.date, inSameDayAs: today) }
+        #expect(todayData?.total == 8.0)
+    }
+
+    @Test func todayVM_weeklyDataIncludesPastDays() throws {
+        let container = try TestHelpers.makeContainer()
+        let context = container.mainContext
+
+        let activity = TestHelpers.makeWaterActivity(context: context)
+        TestHelpers.makeDefaultRoutine(context: context, waterActivity: activity)
+
+        let threeDaysAgo = Calendar.current.date(byAdding: .day, value: -3, to: .now)!
+        context.insert(Event(activity: activity, timestamp: threeDaysAgo, quantity: 20.0))
+        try context.save()
+
+        let vm = TodayViewModel(modelContext: context)
+
+        let dayData = vm.weeklyData.first {
+            Calendar.current.isDate($0.date, inSameDayAs: Calendar.current.startOfDay(for: threeDaysAgo))
+        }
+        #expect(dayData?.total == 20.0)
+    }
+
+    @Test func todayVM_weeklyDataExcludesOlderThan7Days() throws {
+        let container = try TestHelpers.makeContainer()
+        let context = container.mainContext
+
+        let activity = TestHelpers.makeWaterActivity(context: context)
+        TestHelpers.makeDefaultRoutine(context: context, waterActivity: activity)
+
+        let eightDaysAgo = Calendar.current.date(byAdding: .day, value: -8, to: .now)!
+        context.insert(Event(activity: activity, timestamp: eightDaysAgo, quantity: 50.0))
+        try context.save()
+
+        let vm = TodayViewModel(modelContext: context)
+
+        let allTotals = vm.weeklyData.map(\.total)
+        #expect(!allTotals.contains(50.0))
+    }
+
+    // =========================================================================
+    // MARK: - TodayViewModel: Streak
+    // =========================================================================
+
+    @Test func todayVM_streakZeroWhenNoEntries() throws {
+        let container = try TestHelpers.makeContainer()
+        let vm = TodayViewModel(modelContext: container.mainContext)
+
+        #expect(vm.currentStreak == 0)
+    }
+
+    @Test func todayVM_streakOneWhenGoalMetToday() throws {
+        let container = try TestHelpers.makeContainer()
+        let vm = TodayViewModel(modelContext: container.mainContext)
+
+        for _ in 0..<8 { vm.logWater() }
+        #expect(vm.currentStreak == 1)
+    }
+
+    @Test func todayVM_streakCountsConsecutiveDays() throws {
+        let container = try TestHelpers.makeContainer()
+        let context = container.mainContext
+
+        let activity = TestHelpers.makeWaterActivity(context: context)
+        TestHelpers.makeDefaultRoutine(context: context, waterActivity: activity)
+
+        // Meet goal today + yesterday + day before
+        for daysAgo in 0..<3 {
+            let date = Calendar.current.date(byAdding: .day, value: -daysAgo, to: .now)!
+            context.insert(Event(activity: activity, timestamp: date, quantity: 64.0))
+        }
+        try context.save()
+
+        let vm = TodayViewModel(modelContext: context)
+        #expect(vm.currentStreak == 3)
+    }
+
+    @Test func todayVM_streakBreaksOnMissedDay() throws {
+        let container = try TestHelpers.makeContainer()
+        let context = container.mainContext
+
+        let activity = TestHelpers.makeWaterActivity(context: context)
+        TestHelpers.makeDefaultRoutine(context: context, waterActivity: activity)
+
+        // Meet goal today and 2 days ago (skip yesterday)
+        context.insert(Event(activity: activity, quantity: 64.0))
+        let twoDaysAgo = Calendar.current.date(byAdding: .day, value: -2, to: .now)!
+        context.insert(Event(activity: activity, timestamp: twoDaysAgo, quantity: 64.0))
+        try context.save()
+
+        let vm = TodayViewModel(modelContext: context)
+        #expect(vm.currentStreak == 1) // only today counts
+    }
+
+    @Test func todayVM_streakStartsFromYesterday() throws {
+        let container = try TestHelpers.makeContainer()
+        let context = container.mainContext
+
+        let activity = TestHelpers.makeWaterActivity(context: context)
+        TestHelpers.makeDefaultRoutine(context: context, waterActivity: activity)
+
+        // Goal met yesterday and day before, but NOT today
+        for daysAgo in 1..<3 {
+            let date = Calendar.current.date(byAdding: .day, value: -daysAgo, to: .now)!
+            context.insert(Event(activity: activity, timestamp: date, quantity: 64.0))
+        }
+        try context.save()
+
+        let vm = TodayViewModel(modelContext: context)
+        #expect(vm.currentStreak == 2)
+    }
+
+    // =========================================================================
+    // MARK: - TodayViewModel: Date Edge Cases
+    // =========================================================================
+
+    @Test func todayVM_entryAtExactMidnightBelongsToThatDay() throws {
+        let container = try TestHelpers.makeContainer()
+        let context = container.mainContext
+
+        let activity = TestHelpers.makeWaterActivity(context: context)
+        TestHelpers.makeDefaultRoutine(context: context, waterActivity: activity)
+
+        let midnight = Calendar.current.startOfDay(for: .now)
+        context.insert(Event(activity: activity, timestamp: midnight, quantity: 8.0))
+        try context.save()
+
+        let vm = TodayViewModel(modelContext: context)
+        #expect(vm.todayTotal == 8.0)
+    }
+
+    @Test func todayVM_entryBeforeMidnightExcluded() throws {
+        let container = try TestHelpers.makeContainer()
+        let context = container.mainContext
+
+        let activity = TestHelpers.makeWaterActivity(context: context)
+        TestHelpers.makeDefaultRoutine(context: context, waterActivity: activity)
+
+        let midnight = Calendar.current.startOfDay(for: .now)
+        let justBefore = midnight.addingTimeInterval(-1)
+        context.insert(Event(activity: activity, timestamp: justBefore, quantity: 8.0))
+        try context.save()
+
+        let vm = TodayViewModel(modelContext: context)
+        #expect(vm.todayTotal == 0.0)
+    }
+
+    // =========================================================================
+    // MARK: - TodayViewModel: Settings Persistence
+    // =========================================================================
+
+    @Test func todayVM_settingsRoundTrip() throws {
+        let container = try TestHelpers.makeContainer()
+        let context = container.mainContext
+
+        // First VM: change settings
+        let vm1 = TodayViewModel(modelContext: context)
+        vm1.updateDailyGoal(100.0)
+        vm1.updateServingSize(16.0)
+
+        // Second VM: should load the changed settings
+        let vm2 = TodayViewModel(modelContext: context)
+        #expect(vm2.dailyGoal == 100.0)
+        #expect(vm2.servingSize == 16.0)
+    }
+
+    @Test func todayVM_settingsPreservesFractionalValues() throws {
+        let container = try TestHelpers.makeContainer()
+        let context = container.mainContext
+
+        let vm1 = TodayViewModel(modelContext: context)
+        vm1.updateDailyGoal(33.3)
+        vm1.updateServingSize(6.5)
+
+        let vm2 = TodayViewModel(modelContext: context)
+        #expect(vm2.dailyGoal == 33.3)
+        #expect(vm2.servingSize == 6.5)
+    }
+
+    // =========================================================================
+    // MARK: - HistoryViewModel: Basic
+    // =========================================================================
+
+    @Test func historyVM_initiallyEmpty() throws {
+        let container = try TestHelpers.makeContainer()
+        let context = container.mainContext
+
+        // Create water activity so the VM can query for it
+        TestHelpers.makeWaterActivity(context: context)
+        try context.save()
+
+        let vm = HistoryViewModel(modelContext: context)
+        #expect(vm.daySummaries.isEmpty)
+    }
+
+    @Test func historyVM_groupsByDay() throws {
+        let container = try TestHelpers.makeContainer()
+        let context = container.mainContext
+
+        let activity = TestHelpers.makeWaterActivity(context: context)
+
+        let today = Date.now
+        let yesterday = Calendar.current.date(byAdding: .day, value: -1, to: today)!
+
+        context.insert(Event(activity: activity, timestamp: today, quantity: 8.0))
+        context.insert(Event(activity: activity, timestamp: yesterday, quantity: 16.0))
+        try context.save()
+
+        let vm = HistoryViewModel(modelContext: context)
+        #expect(vm.daySummaries.count == 2)
+    }
+
+    @Test func historyVM_daySummaryTotal() throws {
+        let container = try TestHelpers.makeContainer()
+        let context = container.mainContext
+
+        let activity = TestHelpers.makeWaterActivity(context: context)
+
+        context.insert(Event(activity: activity, quantity: 8.0))
+        context.insert(Event(activity: activity, quantity: 12.0))
+        context.insert(Event(activity: activity, quantity: 4.0))
+        try context.save()
+
+        let vm = HistoryViewModel(modelContext: context)
+        #expect(vm.daySummaries.first?.total == 24.0)
+    }
+
+    @Test func historyVM_sortedNewestFirst() throws {
+        let container = try TestHelpers.makeContainer()
+        let context = container.mainContext
+
+        let activity = TestHelpers.makeWaterActivity(context: context)
+
+        let twoDaysAgo = Calendar.current.date(byAdding: .day, value: -2, to: .now)!
+        let yesterday = Calendar.current.date(byAdding: .day, value: -1, to: .now)!
+
+        context.insert(Event(activity: activity, timestamp: twoDaysAgo, quantity: 1.0))
+        context.insert(Event(activity: activity, timestamp: yesterday, quantity: 2.0))
+        context.insert(Event(activity: activity, quantity: 3.0))
+        try context.save()
+
+        let vm = HistoryViewModel(modelContext: context)
+        #expect(vm.daySummaries.count == 3)
+        #expect(vm.daySummaries[0].total == 3.0) // today
+        #expect(vm.daySummaries[1].total == 2.0) // yesterday
+        #expect(vm.daySummaries[2].total == 1.0) // 2 days ago
+    }
+
+    @Test func historyVM_entriesWithinDaySortedNewestFirst() throws {
+        let container = try TestHelpers.makeContainer()
+        let context = container.mainContext
+
+        let activity = TestHelpers.makeWaterActivity(context: context)
+
+        let cal = Calendar.current
+        let today = cal.startOfDay(for: .now)
+        let morning = cal.date(byAdding: .hour, value: 8, to: today)!
+        let noon = cal.date(byAdding: .hour, value: 12, to: today)!
+
+        context.insert(Event(activity: activity, timestamp: morning, quantity: 8.0))
+        context.insert(Event(activity: activity, timestamp: noon, quantity: 16.0))
+        try context.save()
+
+        let vm = HistoryViewModel(modelContext: context)
+        let entries = vm.daySummaries.first?.entries ?? []
+        #expect(entries.count == 2)
+        #expect(entries[0].quantity == 16.0) // noon first (newest)
+        #expect(entries[1].quantity == 8.0)  // morning second
+    }
+
+    @Test func historyVM_addEntry() throws {
+        let container = try TestHelpers.makeContainer()
+        let context = container.mainContext
+
+        TestHelpers.makeWaterActivity(context: context)
+        try context.save()
+
+        let vm = HistoryViewModel(modelContext: context)
+        vm.addEntry(amount: 12.0)
+
+        #expect(vm.daySummaries.count == 1)
+        #expect(vm.daySummaries.first?.total == 12.0)
+    }
+
+    @Test func historyVM_addEntryWithCustomDate() throws {
+        let container = try TestHelpers.makeContainer()
+        let context = container.mainContext
+
+        TestHelpers.makeWaterActivity(context: context)
+        try context.save()
+
+        let yesterday = Calendar.current.date(byAdding: .day, value: -1, to: .now)!
+        let vm = HistoryViewModel(modelContext: context)
+        vm.addEntry(amount: 10.0, timestamp: yesterday)
+
+        #expect(vm.daySummaries.count == 1)
+        #expect(vm.daySummaries.first?.total == 10.0)
+    }
+
+    @Test func historyVM_deleteEntry() throws {
+        let container = try TestHelpers.makeContainer()
+        let context = container.mainContext
+
+        TestHelpers.makeWaterActivity(context: context)
+        try context.save()
+
+        let vm = HistoryViewModel(modelContext: context)
+        vm.addEntry(amount: 8.0)
+        vm.addEntry(amount: 12.0)
+
+        let entry = vm.daySummaries.first!.entries.first!
+        vm.deleteEntry(entry)
+
+        #expect(vm.daySummaries.first?.entries.count == 1)
+    }
+
+    @Test func historyVM_deleteLastEntryRemovesDay() throws {
+        let container = try TestHelpers.makeContainer()
+        let context = container.mainContext
+
+        TestHelpers.makeWaterActivity(context: context)
+        try context.save()
+
+        let vm = HistoryViewModel(modelContext: context)
+        vm.addEntry(amount: 8.0)
+
+        let entry = vm.daySummaries.first!.entries.first!
+        vm.deleteEntry(entry)
+
+        #expect(vm.daySummaries.isEmpty)
+    }
+
+    @Test func historyVM_updateEntryAmount() throws {
+        let container = try TestHelpers.makeContainer()
+        let context = container.mainContext
+
+        TestHelpers.makeWaterActivity(context: context)
+        try context.save()
+
+        let vm = HistoryViewModel(modelContext: context)
+        vm.addEntry(amount: 8.0)
+
+        let entry = vm.daySummaries.first!.entries.first!
+        vm.updateEntry(entry, amount: 20.0)
+
+        #expect(vm.daySummaries.first?.total == 20.0)
+    }
+
+    @Test func historyVM_updateEntryTimestamp() throws {
+        let container = try TestHelpers.makeContainer()
+        let context = container.mainContext
+
+        TestHelpers.makeWaterActivity(context: context)
+        try context.save()
+
+        let vm = HistoryViewModel(modelContext: context)
+        vm.addEntry(amount: 8.0)
+
+        let yesterday = Calendar.current.date(byAdding: .day, value: -1, to: .now)!
+        let entry = vm.daySummaries.first!.entries.first!
+        vm.updateEntry(entry, timestamp: yesterday)
+
+        // Entry moved to yesterday — today should be empty, yesterday should have it
+        let todayStart = Calendar.current.startOfDay(for: .now)
+        let yesterdayStart = Calendar.current.startOfDay(for: yesterday)
+        let todaySummary = vm.daySummaries.first { Calendar.current.isDate($0.date, inSameDayAs: todayStart) }
+        let yesterdaySummary = vm.daySummaries.first { Calendar.current.isDate($0.date, inSameDayAs: yesterdayStart) }
+        #expect(todaySummary == nil)
+        #expect(yesterdaySummary?.total == 8.0)
+    }
+
+    // =========================================================================
+    // MARK: - SleepNight Model
+    // =========================================================================
+
+    @Test func sleepNight_timeInBed() {
+        let night = SleepNight(
+            date: .now,
+            inBedInterval: DateInterval(start: .now.addingTimeInterval(-28800), duration: 28800),
+            totalSleepDuration: 25200,
+            stages: nil
+        )
+        #expect(night.timeInBed == 28800) // 8 hours
+    }
+
+    @Test func sleepNight_efficiency() {
+        let night = SleepNight(
+            date: .now,
+            inBedInterval: DateInterval(start: .now.addingTimeInterval(-28800), duration: 28800),
+            totalSleepDuration: 25200,
+            stages: nil
+        )
+        #expect(night.efficiency == 25200.0 / 28800.0) // 87.5%
+    }
+
+    @Test func sleepNight_efficiencyZeroWhenNoTimeInBed() {
+        let night = SleepNight(
+            date: .now,
+            inBedInterval: DateInterval(start: .now, duration: 0),
+            totalSleepDuration: 0,
+            stages: nil
+        )
+        #expect(night.efficiency == 0)
+    }
+
+    // =========================================================================
+    // MARK: - TimeInterval Formatting
+    // =========================================================================
+
+    @Test func sleepFormatted_hoursAndMinutes() {
+        let duration: TimeInterval = 7 * 3600 + 32 * 60
+        #expect(duration.sleepFormatted == "7h 32m")
+    }
+
+    @Test func sleepFormatted_minutesOnly() {
+        let duration: TimeInterval = 45 * 60
+        #expect(duration.sleepFormatted == "45m")
+    }
+
+    @Test func sleepFormatted_zero() {
+        let duration: TimeInterval = 0
+        #expect(duration.sleepFormatted == "0m")
+    }
+
+    @Test func sleepFormatted_exactHours() {
+        let duration: TimeInterval = 8 * 3600
+        #expect(duration.sleepFormatted == "8h 0m")
+    }
+
+    // =========================================================================
+    // MARK: - SleepAggregator
+    // =========================================================================
+
+    @Test func aggregator_emptyInput() {
+        let result = SleepAggregator.aggregate([])
+        #expect(result.isEmpty)
+    }
+
+    @Test func aggregator_singleNight() {
+        let samples = [
+            RawSleepSample(
+                startDate: date(2026, 3, 1, 23, 0),
+                endDate: date(2026, 3, 2, 7, 0),
+                category: .asleepUnspecified
+            )
+        ]
+        let result = SleepAggregator.aggregate(samples)
+        #expect(result.count == 1)
+        #expect(result.first?.totalSleepDuration == 28800.0)
+    }
+
+    @Test func aggregator_assignsToWakeUpDay() {
+        let samples = [
+            RawSleepSample(
+                startDate: date(2026, 3, 1, 23, 0),
+                endDate: date(2026, 3, 2, 7, 0),
+                category: .asleepUnspecified
+            )
+        ]
+        let result = SleepAggregator.aggregate(samples)
+        let cal = Calendar.current
+        let expectedDate = cal.startOfDay(for: date(2026, 3, 2, 7, 0))
+        #expect(result.first?.date == expectedDate)
+    }
+
+    @Test func aggregator_aggregatesStages() {
+        let samples = [
+            RawSleepSample(startDate: date(2026, 3, 1, 23, 0), endDate: date(2026, 3, 2, 1, 0), category: .asleepCore),
+            RawSleepSample(startDate: date(2026, 3, 2, 1, 0), endDate: date(2026, 3, 2, 2, 30), category: .asleepDeep),
+            RawSleepSample(startDate: date(2026, 3, 2, 2, 30), endDate: date(2026, 3, 2, 4, 0), category: .asleepREM),
+            RawSleepSample(startDate: date(2026, 3, 2, 4, 0), endDate: date(2026, 3, 2, 4, 15), category: .awake),
+            RawSleepSample(startDate: date(2026, 3, 2, 4, 15), endDate: date(2026, 3, 2, 7, 0), category: .asleepCore),
+        ]
+        let result = SleepAggregator.aggregate(samples)
+        #expect(result.count == 1)
+        let stages = result.first!.stages!
+        #expect(stages.core == 17100.0)  // 2h + 2h45m = 4h45m = 17100s
+        #expect(stages.deep == 5400.0)   // 1h30m = 5400s
+        #expect(stages.rem == 5400.0)    // 1h30m = 5400s
+        #expect(stages.awake == 900.0)   // 15m = 900s
+    }
+
+    @Test func aggregator_noStagesWhenOnlyUnspecified() {
+        let samples = [
+            RawSleepSample(startDate: date(2026, 3, 1, 23, 0), endDate: date(2026, 3, 2, 7, 0), category: .asleepUnspecified)
+        ]
+        let result = SleepAggregator.aggregate(samples)
+        #expect(result.first?.stages == nil)
+    }
+
+    @Test func aggregator_inBedDoesntCountAsSleep() {
+        let samples = [
+            RawSleepSample(startDate: date(2026, 3, 1, 22, 30), endDate: date(2026, 3, 1, 23, 0), category: .inBed),
+            RawSleepSample(startDate: date(2026, 3, 1, 23, 0), endDate: date(2026, 3, 2, 7, 0), category: .asleepUnspecified),
+        ]
+        let result = SleepAggregator.aggregate(samples)
+        #expect(result.first?.totalSleepDuration == 28800.0)
+    }
+
+    @Test func aggregator_filtersOutNaps() {
+        let samples = [
+            // 2-hour nap (< 3 hours)
+            RawSleepSample(startDate: date(2026, 3, 2, 14, 0), endDate: date(2026, 3, 2, 16, 0), category: .asleepUnspecified),
+        ]
+        let result = SleepAggregator.aggregate(samples)
+        #expect(result.isEmpty)
+    }
+
+    @Test func aggregator_keepsSleepJustOver3Hours() {
+        let samples = [
+            RawSleepSample(startDate: date(2026, 3, 2, 2, 0), endDate: date(2026, 3, 2, 5, 1), category: .asleepUnspecified),
+        ]
+        let result = SleepAggregator.aggregate(samples)
+        #expect(result.count == 1)
+    }
+
+    @Test func aggregator_separatesMultipleNights() {
+        let samples = [
+            RawSleepSample(startDate: date(2026, 3, 1, 23, 0), endDate: date(2026, 3, 2, 7, 0), category: .asleepUnspecified),
+            RawSleepSample(startDate: date(2026, 3, 2, 23, 0), endDate: date(2026, 3, 3, 6, 30), category: .asleepUnspecified),
+        ]
+        let result = SleepAggregator.aggregate(samples)
+        #expect(result.count == 2)
+    }
+
+    @Test func aggregator_mergesAdjacentSamples() {
+        let samples = [
+            RawSleepSample(startDate: date(2026, 3, 1, 23, 0), endDate: date(2026, 3, 2, 3, 0), category: .asleepUnspecified),
+            RawSleepSample(startDate: date(2026, 3, 2, 3, 10), endDate: date(2026, 3, 2, 7, 0), category: .asleepUnspecified),
+        ]
+        let result = SleepAggregator.aggregate(samples)
+        #expect(result.count == 1)
+    }
+
+    @Test func aggregator_splitsLargeGap() {
+        let samples = [
+            RawSleepSample(startDate: date(2026, 3, 1, 23, 0), endDate: date(2026, 3, 2, 6, 0), category: .asleepUnspecified),
+            RawSleepSample(startDate: date(2026, 3, 2, 23, 0), endDate: date(2026, 3, 3, 7, 0), category: .asleepUnspecified),
+        ]
+        let result = SleepAggregator.aggregate(samples)
+        #expect(result.count == 2)
+    }
+
+    // =========================================================================
+    // MARK: - HistoryViewModel + Sleep Integration
+    // =========================================================================
+
+    @Test func historyVM_mergesSleepWithWater() async throws {
+        let container = try TestHelpers.makeContainer()
+        let context = container.mainContext
+
+        let activity = TestHelpers.makeWaterActivity(context: context)
+        context.insert(Event(activity: activity, quantity: 8.0))
+        try context.save()
+
+        let mock = MockHealthKitService()
+        let today = Calendar.current.startOfDay(for: .now)
+        mock.mockSleepNights = [
+            SleepNight(
+                date: today,
+                inBedInterval: DateInterval(start: today.addingTimeInterval(-28800), duration: 28800),
+                totalSleepDuration: 25200,
+                stages: nil
+            )
+        ]
+
+        let vm = HistoryViewModel(modelContext: context, healthService: mock)
+        await vm.refreshWithSleep()
+
+        #expect(vm.daySummaries.count == 1)
+        #expect(vm.daySummaries.first?.sleepNight != nil)
+        #expect(vm.daySummaries.first?.total == 8.0)
+    }
+
+    @Test func historyVM_sleepOnlyDay() async throws {
+        let container = try TestHelpers.makeContainer()
+        let context = container.mainContext
+
+        TestHelpers.makeWaterActivity(context: context)
+        try context.save()
+
+        let mock = MockHealthKitService()
+        let yesterday = Calendar.current.date(byAdding: .day, value: -1, to: .now)!
+        let yesterdayStart = Calendar.current.startOfDay(for: yesterday)
+        mock.mockSleepNights = [
+            SleepNight(
+                date: yesterdayStart,
+                inBedInterval: DateInterval(start: yesterdayStart.addingTimeInterval(-28800), duration: 28800),
+                totalSleepDuration: 25200,
+                stages: nil
+            )
+        ]
+
+        let vm = HistoryViewModel(modelContext: context, healthService: mock)
+        await vm.refreshWithSleep()
+
+        #expect(vm.daySummaries.count == 1)
+        #expect(vm.daySummaries.first?.sleepNight != nil)
+        #expect(vm.daySummaries.first?.entries.isEmpty == true)
+    }
+
+    @Test func historyVM_waterOnlyDayNilSleep() async throws {
+        let container = try TestHelpers.makeContainer()
+        let context = container.mainContext
+
+        let activity = TestHelpers.makeWaterActivity(context: context)
+        context.insert(Event(activity: activity, quantity: 8.0))
+        try context.save()
+
+        let mock = MockHealthKitService()
+        mock.mockSleepNights = []
+
+        let vm = HistoryViewModel(modelContext: context, healthService: mock)
+        await vm.refreshWithSleep()
+
+        #expect(vm.daySummaries.count == 1)
+        #expect(vm.daySummaries.first?.sleepNight == nil)
+    }
+
+    @Test func historyVM_healthKitUnavailable() async throws {
+        let container = try TestHelpers.makeContainer()
+        let context = container.mainContext
+
+        TestHelpers.makeWaterActivity(context: context)
+        try context.save()
+
+        let mock = MockHealthKitService()
+        mock.isAvailable = false
+
+        let vm = HistoryViewModel(modelContext: context, healthService: mock)
+        await vm.refreshWithSleep()
+
+        #expect(vm.healthAuthStatus == .unavailable)
+    }
+
+    @Test func historyVM_requestsAuthOnFirstLoad() async throws {
+        let container = try TestHelpers.makeContainer()
+        let context = container.mainContext
+
+        TestHelpers.makeWaterActivity(context: context)
+        try context.save()
+
+        let mock = MockHealthKitService()
+        let vm = HistoryViewModel(modelContext: context, healthService: mock)
+        await vm.refreshWithSleep()
+
+        #expect(mock.authorizationRequested == true)
+        #expect(vm.healthAuthStatus == .requested)
+    }
+
+    @Test func historyVM_authRequestedOnlyOnce() async throws {
+        let container = try TestHelpers.makeContainer()
+        let context = container.mainContext
+
+        TestHelpers.makeWaterActivity(context: context)
+        try context.save()
+
+        let mock = MockHealthKitService()
+        let vm = HistoryViewModel(modelContext: context, healthService: mock)
+        await vm.refreshWithSleep()
+        mock.authorizationRequested = false
+        await vm.refreshWithSleep()
+
+        #expect(mock.authorizationRequested == false)
+    }
+
+    @Test func historyVM_sleepFetchFailureShowsWater() async throws {
+        let container = try TestHelpers.makeContainer()
+        let context = container.mainContext
+
+        let activity = TestHelpers.makeWaterActivity(context: context)
+        context.insert(Event(activity: activity, quantity: 8.0))
+        try context.save()
+
+        let mock = MockHealthKitService()
+        mock.shouldThrowOnFetch = true
+
+        let vm = HistoryViewModel(modelContext: context, healthService: mock)
+        await vm.refreshWithSleep()
+
+        #expect(vm.daySummaries.count == 1)
+        #expect(vm.daySummaries.first?.total == 8.0)
+        #expect(vm.daySummaries.first?.sleepNight == nil)
+    }
+
+    @Test func historyVM_authFailureShowsWater() async throws {
+        let container = try TestHelpers.makeContainer()
+        let context = container.mainContext
+
+        let activity = TestHelpers.makeWaterActivity(context: context)
+        context.insert(Event(activity: activity, quantity: 8.0))
+        try context.save()
+
+        let mock = MockHealthKitService()
+        mock.shouldThrowOnAuth = true
+
+        let vm = HistoryViewModel(modelContext: context, healthService: mock)
+        await vm.refreshWithSleep()
+
+        #expect(vm.daySummaries.count == 1)
+        #expect(vm.daySummaries.first?.total == 8.0)
+    }
+
+    @Test func historyVM_noHealthServiceSkipsSleep() throws {
+        let container = try TestHelpers.makeContainer()
+        let context = container.mainContext
+
+        let activity = TestHelpers.makeWaterActivity(context: context)
+        context.insert(Event(activity: activity, quantity: 8.0))
+        try context.save()
+
+        // No health service — backward compatible
+        let vm = HistoryViewModel(modelContext: context)
+        #expect(vm.daySummaries.count == 1)
+        #expect(vm.daySummaries.first?.sleepNight == nil)
+    }
+
+    // =========================================================================
+    // MARK: - WaterEntry (Legacy — kept while model exists)
+    // =========================================================================
 
     @Test func waterEntry_create() throws {
         let container = try TestHelpers.makeContainer()
@@ -24,1276 +1257,12 @@ struct AllTests {
         #expect(entries.first?.amount == 8.0)
     }
 
-    @Test func waterEntry_createWithCustomTimestamp() throws {
-        let container = try TestHelpers.makeContainer()
-        let context = container.mainContext
-
-        let date = Date(timeIntervalSince1970: 1_000_000)
-        let entry = WaterEntry(timestamp: date, amount: 12.0)
-        context.insert(entry)
-        try context.save()
-
-        let entries = try context.fetch(FetchDescriptor<WaterEntry>())
-        #expect(entries.first?.timestamp == date)
-        #expect(entries.first?.amount == 12.0)
-    }
-
-    @Test func waterEntry_defaultTimestampIsNow() throws {
-        let before = Date.now
-        let entry = WaterEntry(amount: 8.0)
-        let after = Date.now
-        #expect(entry.timestamp >= before)
-        #expect(entry.timestamp <= after)
-    }
-
-    // MARK: - WaterEntry: Deletion
-
-    @Test func waterEntry_delete() throws {
-        let container = try TestHelpers.makeContainer()
-        let context = container.mainContext
-
-        let entry = WaterEntry(amount: 8.0)
-        context.insert(entry)
-        try context.save()
-        context.delete(entry)
-        try context.save()
-
-        let entries = try context.fetch(FetchDescriptor<WaterEntry>())
-        #expect(entries.isEmpty)
-    }
-
-    // MARK: - WaterEntry: Queries
-
-    @Test func waterEntry_fetchToday() throws {
-        let container = try TestHelpers.makeContainer()
-        let context = container.mainContext
-
-        context.insert(WaterEntry(amount: 8.0))
-        let yesterday = Calendar.current.date(byAdding: .day, value: -1, to: .now)!
-        context.insert(WaterEntry(timestamp: yesterday, amount: 16.0))
-        try context.save()
-
-        let startOfDay = Calendar.current.startOfDay(for: .now)
-        let tomorrow = Calendar.current.date(byAdding: .day, value: 1, to: startOfDay)!
-        var descriptor = FetchDescriptor<WaterEntry>(
-            predicate: #Predicate<WaterEntry> { $0.timestamp >= startOfDay && $0.timestamp < tomorrow }
-        )
-        descriptor.sortBy = [SortDescriptor(\.timestamp)]
-
-        let todayEntries = try context.fetch(descriptor)
-        #expect(todayEntries.count == 1)
-        #expect(todayEntries.first?.amount == 8.0)
-    }
-
-    @Test func waterEntry_sumToday() throws {
-        let container = try TestHelpers.makeContainer()
-        let context = container.mainContext
-
-        context.insert(WaterEntry(amount: 8.0))
-        context.insert(WaterEntry(amount: 12.0))
-        context.insert(WaterEntry(amount: 8.0))
-        let yesterday = Calendar.current.date(byAdding: .day, value: -1, to: .now)!
-        context.insert(WaterEntry(timestamp: yesterday, amount: 99.0))
-        try context.save()
-
-        let startOfDay = Calendar.current.startOfDay(for: .now)
-        let tomorrow = Calendar.current.date(byAdding: .day, value: 1, to: startOfDay)!
-        let descriptor = FetchDescriptor<WaterEntry>(
-            predicate: #Predicate<WaterEntry> { $0.timestamp >= startOfDay && $0.timestamp < tomorrow }
-        )
-        let todayEntries = try context.fetch(descriptor)
-        let total = todayEntries.reduce(0.0) { $0 + $1.amount }
-        #expect(total == 28.0)
-    }
-
-    @Test func waterEntry_multiplePersist() throws {
-        let container = try TestHelpers.makeContainer()
-        let context = container.mainContext
-
-        for i in 1...5 {
-            context.insert(WaterEntry(amount: Double(i) * 4.0))
-        }
-        try context.save()
-
-        let entries = try context.fetch(FetchDescriptor<WaterEntry>())
-        #expect(entries.count == 5)
-    }
-
-    @Test func waterEntry_update() throws {
-        let container = try TestHelpers.makeContainer()
-        let context = container.mainContext
-
-        let entry = WaterEntry(amount: 8.0)
-        context.insert(entry)
-        try context.save()
-        entry.amount = 16.0
-        try context.save()
-
-        let entries = try context.fetch(FetchDescriptor<WaterEntry>())
-        #expect(entries.count == 1)
-        #expect(entries.first?.amount == 16.0)
-    }
-
-    // MARK: - TodayViewModel: Initial state
-
-    @Test func vm_initialTodayTotalIsZero() throws {
-        let (vm, _) = try makeVM()
-        #expect(vm.todayTotal == 0.0)
-    }
-
-    @Test func vm_initialProgressIsZero() throws {
-        let (vm, _) = try makeVM()
-        #expect(vm.progress == 0.0)
-    }
-
-    // MARK: - TodayViewModel: Logging
-
-    @Test func vm_logWaterIncreasesTotal() throws {
-        let (vm, _keepAlive) = try makeVM()
-        vm.logWater()
-        #expect(vm.todayTotal == 8.0)
-        _ = _keepAlive
-    }
-
-    @Test func vm_logWaterMultipleTimes() throws {
-        let (vm, _keepAlive) = try makeVM()
-        vm.logWater()
-        vm.logWater()
-        vm.logWater()
-        #expect(vm.todayTotal == 24.0)
-        _ = _keepAlive
-    }
-
-    @Test func vm_logWaterCreatesEntry() throws {
-        let (vm, _keepAlive) = try makeVM()
-        vm.logWater()
-        #expect(vm.todayEntries.count == 1)
-        #expect(vm.todayEntries.first?.amount == 8.0)
-        _ = _keepAlive
-    }
-
-    // MARK: - TodayViewModel: Progress
-
-    @Test func vm_progressCalculation() throws {
-        let (vm, _keepAlive) = try makeVM()
-        vm.logWater()
-        #expect(vm.progress == 8.0 / 64.0)
-        _ = _keepAlive
-    }
-
-    @Test func vm_progressCapsAtOne() throws {
-        let (vm, _keepAlive) = try makeVM()
-        for _ in 0..<10 { vm.logWater() }
-        #expect(vm.progress == 1.0)
-        _ = _keepAlive
-    }
-
-    // MARK: - TodayViewModel: Goal
-
-    @Test func vm_goalMetAtTarget() throws {
-        let (vm, _keepAlive) = try makeVM()
-        for _ in 0..<8 { vm.logWater() }
-        #expect(vm.goalMet == true)
-        _ = _keepAlive
-    }
-
-    @Test func vm_goalNotMetBelowTarget() throws {
-        let (vm, _keepAlive) = try makeVM()
-        vm.logWater()
-        #expect(vm.goalMet == false)
-        _ = _keepAlive
-    }
-
-    @Test func vm_excludesYesterday() throws {
-        let container = try TestHelpers.makeContainer()
-        let context = container.mainContext
-        let yesterday = Calendar.current.date(byAdding: .day, value: -1, to: .now)!
-        context.insert(WaterEntry(timestamp: yesterday, amount: 32.0))
-        try context.save()
-
-        let vm = TodayViewModel(modelContext: context, defaults: TestHelpers.makeDefaults())
-        vm.refresh()
-        #expect(vm.todayTotal == 0.0)
-        #expect(vm.todayEntries.isEmpty)
-    }
-
-    // MARK: - TodayViewModel: Custom settings
-
-    @Test func vm_customServingSize() throws {
-        let (vm, _keepAlive) = try makeVM()
-        vm.servingSize = 12.0
-        vm.logWater()
-        #expect(vm.todayTotal == 12.0)
-        _ = _keepAlive
-    }
-
-    @Test func vm_customGoal() throws {
-        let (vm, _keepAlive) = try makeVM()
-        vm.dailyGoal = 32.0
-        vm.logWater()
-        #expect(vm.progress == 8.0 / 32.0)
-        _ = _keepAlive
-    }
-
-    // MARK: - TodayViewModel: Display strings
-
-    @Test func vm_todayTotalDisplay() throws {
-        let (vm, _keepAlive) = try makeVM()
-        vm.logWater()
-        vm.logWater()
-        #expect(vm.todayTotalDisplay == "16")
-        _ = _keepAlive
-    }
-
-    @Test func vm_dailyGoalDisplay() throws {
-        let (vm, _) = try makeVM()
-        #expect(vm.dailyGoalDisplay == "64")
-    }
-
-    // MARK: - TodayViewModel: Settings persistence
-
-    @Test func vm_settingsPersistToDefaults() throws {
-        let container = try TestHelpers.makeContainer()
-        let defaults = TestHelpers.makeDefaults()
-        let vm = TodayViewModel(modelContext: container.mainContext, defaults: defaults)
-
-        vm.dailyGoal = 100.0
-        vm.servingSize = 16.0
-
-        #expect(defaults.double(forKey: WaterSettings.dailyGoalKey) == 100.0)
-        #expect(defaults.double(forKey: WaterSettings.servingSizeKey) == 16.0)
-    }
-
-    @Test func vm_settingsLoadFromDefaults() throws {
-        let container = try TestHelpers.makeContainer()
-        let defaults = TestHelpers.makeDefaults()
-        defaults.set(100.0, forKey: WaterSettings.dailyGoalKey)
-        defaults.set(16.0, forKey: WaterSettings.servingSizeKey)
-
-        let vm = TodayViewModel(modelContext: container.mainContext, defaults: defaults)
-        #expect(vm.dailyGoal == 100.0)
-        #expect(vm.servingSize == 16.0)
-    }
-
-    // MARK: - HistoryViewModel: Initial state
-
-    @Test func history_initiallyEmpty() throws {
-        let (hvm, _) = try makeHistoryVM()
-        #expect(hvm.daySummaries.isEmpty)
-    }
-
-    // MARK: - HistoryViewModel: Day summaries
-
-    @Test func history_groupsByDay() throws {
-        let container = try TestHelpers.makeContainer()
-        let context = container.mainContext
-
-        // Today: 2 entries
-        context.insert(WaterEntry(amount: 8.0))
-        context.insert(WaterEntry(amount: 12.0))
-        // Yesterday: 1 entry
-        let yesterday = Calendar.current.date(byAdding: .day, value: -1, to: .now)!
-        context.insert(WaterEntry(timestamp: yesterday, amount: 16.0))
-        try context.save()
-
-        let hvm = HistoryViewModel(modelContext: context)
-        hvm.refresh()
-        #expect(hvm.daySummaries.count == 2)
-    }
-
-    @Test func history_daySummaryTotal() throws {
-        let container = try TestHelpers.makeContainer()
-        let context = container.mainContext
-
-        context.insert(WaterEntry(amount: 8.0))
-        context.insert(WaterEntry(amount: 12.0))
-        context.insert(WaterEntry(amount: 4.0))
-        try context.save()
-
-        let hvm = HistoryViewModel(modelContext: context)
-        hvm.refresh()
-        #expect(hvm.daySummaries.count == 1)
-        #expect(hvm.daySummaries.first?.total == 24.0)
-    }
-
-    @Test func history_daySummariesSortedNewestFirst() throws {
-        let container = try TestHelpers.makeContainer()
-        let context = container.mainContext
-
-        let threeDaysAgo = Calendar.current.date(byAdding: .day, value: -3, to: .now)!
-        let yesterday = Calendar.current.date(byAdding: .day, value: -1, to: .now)!
-        context.insert(WaterEntry(timestamp: threeDaysAgo, amount: 8.0))
-        context.insert(WaterEntry(amount: 12.0)) // today
-        context.insert(WaterEntry(timestamp: yesterday, amount: 16.0))
-        try context.save()
-
-        let hvm = HistoryViewModel(modelContext: context)
-        hvm.refresh()
-        #expect(hvm.daySummaries.count == 3)
-        // Newest first
-        let dates = hvm.daySummaries.map(\.date)
-        #expect(dates[0] > dates[1])
-        #expect(dates[1] > dates[2])
-    }
-
-    @Test func history_daySummaryEntriesSortedNewestFirst() throws {
-        let container = try TestHelpers.makeContainer()
-        let context = container.mainContext
-
-        let cal = Calendar.current
-        let today = cal.startOfDay(for: .now)
-        let morning = cal.date(byAdding: .hour, value: 8, to: today)!
-        let afternoon = cal.date(byAdding: .hour, value: 14, to: today)!
-        let evening = cal.date(byAdding: .hour, value: 20, to: today)!
-
-        context.insert(WaterEntry(timestamp: afternoon, amount: 12.0))
-        context.insert(WaterEntry(timestamp: morning, amount: 8.0))
-        context.insert(WaterEntry(timestamp: evening, amount: 16.0))
-        try context.save()
-
-        let hvm = HistoryViewModel(modelContext: context)
-        hvm.refresh()
-        let entries = hvm.daySummaries.first!.entries
-        #expect(entries.count == 3)
-        // Newest first within day
-        #expect(entries[0].timestamp >= entries[1].timestamp)
-        #expect(entries[1].timestamp >= entries[2].timestamp)
-    }
-
-    @Test func history_daySummaryEntryCount() throws {
-        let container = try TestHelpers.makeContainer()
-        let context = container.mainContext
-
-        context.insert(WaterEntry(amount: 8.0))
-        context.insert(WaterEntry(amount: 12.0))
-        try context.save()
-
-        let hvm = HistoryViewModel(modelContext: context)
-        hvm.refresh()
-        #expect(hvm.daySummaries.first?.entries.count == 2)
-    }
-
-    // MARK: - HistoryViewModel: Add entry
-
-    @Test func history_addEntry() throws {
-        let (hvm, _keepAlive) = try makeHistoryVM()
-        let date = Calendar.current.date(byAdding: .day, value: -2, to: .now)!
-        hvm.addEntry(amount: 16.0, timestamp: date)
-        hvm.refresh()
-        #expect(hvm.daySummaries.count == 1)
-        #expect(hvm.daySummaries.first?.total == 16.0)
-        _ = _keepAlive
-    }
-
-    @Test func history_addEntryDefaultsToNow() throws {
-        let (hvm, _keepAlive) = try makeHistoryVM()
-        let before = Date.now
-        hvm.addEntry(amount: 8.0)
-        let after = Date.now
-        hvm.refresh()
-        let entry = hvm.daySummaries.first?.entries.first
-        #expect(entry != nil)
-        #expect(entry!.timestamp >= before)
-        #expect(entry!.timestamp <= after)
-        _ = _keepAlive
-    }
-
-    // MARK: - HistoryViewModel: Delete entry
-
-    @Test func history_deleteEntry() throws {
-        let (hvm, _keepAlive) = try makeHistoryVM()
-        hvm.addEntry(amount: 8.0)
-        hvm.addEntry(amount: 12.0)
-        hvm.refresh()
-        #expect(hvm.daySummaries.first?.entries.count == 2)
-
-        let entry = hvm.daySummaries.first!.entries.first!
-        hvm.deleteEntry(entry)
-        hvm.refresh()
-        #expect(hvm.daySummaries.first?.entries.count == 1)
-        _ = _keepAlive
-    }
-
-    @Test func history_deleteLastEntryRemovesDay() throws {
-        let (hvm, _keepAlive) = try makeHistoryVM()
-        hvm.addEntry(amount: 8.0)
-        hvm.refresh()
-
-        let entry = hvm.daySummaries.first!.entries.first!
-        hvm.deleteEntry(entry)
-        hvm.refresh()
-        #expect(hvm.daySummaries.isEmpty)
-        _ = _keepAlive
-    }
-
-    // MARK: - HistoryViewModel: Update entry
-
-    @Test func history_updateEntryAmount() throws {
-        let (hvm, _keepAlive) = try makeHistoryVM()
-        hvm.addEntry(amount: 8.0)
-        hvm.refresh()
-
-        let entry = hvm.daySummaries.first!.entries.first!
-        hvm.updateEntry(entry, amount: 16.0)
-        hvm.refresh()
-        #expect(hvm.daySummaries.first?.total == 16.0)
-        _ = _keepAlive
-    }
-
-    @Test func history_updateEntryTimestamp() throws {
-        let (hvm, _keepAlive) = try makeHistoryVM()
-        hvm.addEntry(amount: 8.0)
-        hvm.refresh()
-
-        let entry = hvm.daySummaries.first!.entries.first!
-        let yesterday = Calendar.current.date(byAdding: .day, value: -1, to: .now)!
-        hvm.updateEntry(entry, timestamp: yesterday)
-        hvm.refresh()
-        // Entry moved to a different day, so now we have 1 summary for yesterday
-        #expect(hvm.daySummaries.count == 1)
-        #expect(hvm.daySummaries.first?.entries.first?.timestamp == yesterday)
-        _ = _keepAlive
-    }
-
-    // MARK: - TodayViewModel: Weekly data
-
-    @Test func vm_weeklyDataHasSevenDays() throws {
-        let (vm, _) = try makeVM()
-        #expect(vm.weeklyData.count == 7)
-    }
-
-    @Test func vm_weeklyDataIncludesToday() throws {
-        let (vm, _keepAlive) = try makeVM()
-        vm.logWater()
-        #expect(vm.weeklyData.last?.total == 8.0)
-        _ = _keepAlive
-    }
-
-    @Test func vm_weeklyDataIncludesPastDays() throws {
-        let container = try TestHelpers.makeContainer()
-        let context = container.mainContext
-
-        // Add entries for yesterday and 2 days ago
-        let yesterday = Calendar.current.date(byAdding: .day, value: -1, to: .now)!
-        let twoDaysAgo = Calendar.current.date(byAdding: .day, value: -2, to: .now)!
-        context.insert(WaterEntry(timestamp: yesterday, amount: 32.0))
-        context.insert(WaterEntry(timestamp: twoDaysAgo, amount: 16.0))
-        try context.save()
-
-        let vm = TodayViewModel(modelContext: context, defaults: TestHelpers.makeDefaults())
-        // weeklyData is sorted oldest→newest (for chart display)
-        // Last entry = today (0), second-to-last = yesterday (32), third-to-last = 2 days ago (16)
-        #expect(vm.weeklyData[vm.weeklyData.count - 1].total == 0.0)  // today
-        #expect(vm.weeklyData[vm.weeklyData.count - 2].total == 32.0) // yesterday
-        #expect(vm.weeklyData[vm.weeklyData.count - 3].total == 16.0) // 2 days ago
-    }
-
-    @Test func vm_weeklyDataExcludesOlderThan7Days() throws {
-        let container = try TestHelpers.makeContainer()
-        let context = container.mainContext
-
-        let eightDaysAgo = Calendar.current.date(byAdding: .day, value: -8, to: .now)!
-        context.insert(WaterEntry(timestamp: eightDaysAgo, amount: 99.0))
-        try context.save()
-
-        let vm = TodayViewModel(modelContext: context, defaults: TestHelpers.makeDefaults())
-        let totalAcrossWeek = vm.weeklyData.reduce(0.0) { $0 + $1.total }
-        #expect(totalAcrossWeek == 0.0)
-    }
-
-    // MARK: - TodayViewModel: Streak
-
-    @Test func vm_streakZeroWhenNoEntries() throws {
-        let (vm, _) = try makeVM()
-        #expect(vm.currentStreak == 0)
-    }
-
-    @Test func vm_streakOneWhenGoalMetToday() throws {
-        let (vm, _keepAlive) = try makeVM()
-        for _ in 0..<8 { vm.logWater() } // 8 × 8 = 64 oz = goal
-        #expect(vm.currentStreak == 1)
-        _ = _keepAlive
-    }
-
-    @Test func vm_streakCountsConsecutiveDays() throws {
-        let container = try TestHelpers.makeContainer()
-        let context = container.mainContext
-
-        let cal = Calendar.current
-        // Today: meet goal
-        context.insert(WaterEntry(amount: 64.0))
-        // Yesterday: meet goal
-        let yesterday = cal.date(byAdding: .day, value: -1, to: .now)!
-        context.insert(WaterEntry(timestamp: yesterday, amount: 64.0))
-        // 2 days ago: meet goal
-        let twoDaysAgo = cal.date(byAdding: .day, value: -2, to: .now)!
-        context.insert(WaterEntry(timestamp: twoDaysAgo, amount: 64.0))
-        try context.save()
-
-        let vm = TodayViewModel(modelContext: context, defaults: TestHelpers.makeDefaults())
-        #expect(vm.currentStreak == 3)
-    }
-
-    @Test func vm_streakBreaksOnMissedDay() throws {
-        let container = try TestHelpers.makeContainer()
-        let context = container.mainContext
-
-        let cal = Calendar.current
-        // Today: meet goal
-        context.insert(WaterEntry(amount: 64.0))
-        // Yesterday: missed (no entries)
-        // 2 days ago: meet goal
-        let twoDaysAgo = cal.date(byAdding: .day, value: -2, to: .now)!
-        context.insert(WaterEntry(timestamp: twoDaysAgo, amount: 64.0))
-        try context.save()
-
-        let vm = TodayViewModel(modelContext: context, defaults: TestHelpers.makeDefaults())
-        #expect(vm.currentStreak == 1) // only today counts
-    }
-
-    @Test func vm_streakStartsFromYesterdayIfTodayNotMet() throws {
-        let container = try TestHelpers.makeContainer()
-        let context = container.mainContext
-
-        let cal = Calendar.current
-        // Today: not met (only 8 oz)
-        context.insert(WaterEntry(amount: 8.0))
-        // Yesterday: met
-        let yesterday = cal.date(byAdding: .day, value: -1, to: .now)!
-        context.insert(WaterEntry(timestamp: yesterday, amount: 64.0))
-        // 2 days ago: met
-        let twoDaysAgo = cal.date(byAdding: .day, value: -2, to: .now)!
-        context.insert(WaterEntry(timestamp: twoDaysAgo, amount: 64.0))
-        try context.save()
-
-        let vm = TodayViewModel(modelContext: context, defaults: TestHelpers.makeDefaults())
-        // Today not met, but yesterday and day before were — streak = 2
-        #expect(vm.currentStreak == 2)
-    }
-
-    // MARK: - Date edge cases
-
-    @Test func vm_entryAtExactMidnightBelongsToThatDay() throws {
-        let container = try TestHelpers.makeContainer()
-        let context = container.mainContext
-        let cal = Calendar.current
-
-        // Insert entry at exactly midnight (start of today)
-        let midnight = cal.startOfDay(for: .now)
-        context.insert(WaterEntry(timestamp: midnight, amount: 8.0))
-        try context.save()
-
-        let vm = TodayViewModel(modelContext: context, defaults: TestHelpers.makeDefaults())
-        #expect(vm.todayTotal == 8.0)
-        #expect(vm.todayEntries.count == 1)
-    }
-
-    @Test func vm_entryOneSecondBeforeMidnightBelongsToYesterday() throws {
-        let container = try TestHelpers.makeContainer()
-        let context = container.mainContext
-        let cal = Calendar.current
-
-        // Insert entry at 23:59:59 yesterday
-        let startOfToday = cal.startOfDay(for: .now)
-        let oneSecondBefore = startOfToday.addingTimeInterval(-1)
-        context.insert(WaterEntry(timestamp: oneSecondBefore, amount: 8.0))
-        try context.save()
-
-        let vm = TodayViewModel(modelContext: context, defaults: TestHelpers.makeDefaults())
-        #expect(vm.todayTotal == 0.0)
-        #expect(vm.todayEntries.isEmpty)
-    }
-
-    @Test func history_entryAtExactMidnightGroupedCorrectly() throws {
-        let container = try TestHelpers.makeContainer()
-        let context = container.mainContext
-        let cal = Calendar.current
-
-        let startOfToday = cal.startOfDay(for: .now)
-        let startOfYesterday = cal.date(byAdding: .day, value: -1, to: startOfToday)!
-
-        // Entry at exact midnight today and exact midnight yesterday
-        context.insert(WaterEntry(timestamp: startOfToday, amount: 8.0))
-        context.insert(WaterEntry(timestamp: startOfYesterday, amount: 12.0))
-        try context.save()
-
-        let hvm = HistoryViewModel(modelContext: context)
-        hvm.refresh()
-        #expect(hvm.daySummaries.count == 2)
-        // Newest first: today then yesterday
-        #expect(hvm.daySummaries[0].total == 8.0)
-        #expect(hvm.daySummaries[1].total == 12.0)
-    }
-
-    @Test func vm_streakAcrossMidnightBoundary() throws {
-        let container = try TestHelpers.makeContainer()
-        let context = container.mainContext
-        let cal = Calendar.current
-
-        let startOfToday = cal.startOfDay(for: .now)
-        // Today at midnight exactly: meets goal
-        context.insert(WaterEntry(timestamp: startOfToday, amount: 64.0))
-        // Yesterday at 23:59:59: meets goal for yesterday
-        let startOfYesterday = cal.date(byAdding: .day, value: -1, to: startOfToday)!
-        let lastSecondYesterday = startOfToday.addingTimeInterval(-1)
-        context.insert(WaterEntry(timestamp: lastSecondYesterday, amount: 64.0))
-        // 2 days ago at start of day: meets goal
-        let startOfTwoDaysAgo = cal.date(byAdding: .day, value: -2, to: startOfToday)!
-        context.insert(WaterEntry(timestamp: startOfTwoDaysAgo, amount: 64.0))
-        try context.save()
-
-        let vm = TodayViewModel(modelContext: context, defaults: TestHelpers.makeDefaults())
-        #expect(vm.currentStreak == 3)
-    }
-
-    @Test func vm_weeklyDataSpanningMonthBoundary() throws {
-        let container = try TestHelpers.makeContainer()
-        let context = container.mainContext
-        let cal = Calendar.current
-
-        // Add entries for each of the past 7 days with increasing amounts
-        let startOfToday = cal.startOfDay(for: .now)
-        for daysBack in 0..<7 {
-            let date = cal.date(byAdding: .day, value: -daysBack, to: startOfToday)!
-            context.insert(WaterEntry(timestamp: date, amount: Double((daysBack + 1) * 8)))
-        }
-        try context.save()
-
-        let vm = TodayViewModel(modelContext: context, defaults: TestHelpers.makeDefaults())
-        #expect(vm.weeklyData.count == 7)
-        // All 7 days should have non-zero totals
-        for day in vm.weeklyData {
-            #expect(day.total > 0)
-        }
-    }
-
-    @Test func vm_todayFilterExcludesEntryAtStartOfTomorrow() throws {
-        let container = try TestHelpers.makeContainer()
-        let context = container.mainContext
-        let cal = Calendar.current
-
-        // Insert entry at start of tomorrow (should NOT appear in today)
-        let startOfToday = cal.startOfDay(for: .now)
-        let startOfTomorrow = cal.date(byAdding: .day, value: 1, to: startOfToday)!
-        context.insert(WaterEntry(timestamp: startOfTomorrow, amount: 99.0))
-        // Also insert today entry for comparison
-        context.insert(WaterEntry(timestamp: startOfToday, amount: 8.0))
-        try context.save()
-
-        let vm = TodayViewModel(modelContext: context, defaults: TestHelpers.makeDefaults())
-        #expect(vm.todayTotal == 8.0)
-        #expect(vm.todayEntries.count == 1)
-    }
-
-    // MARK: - Validation & defensive tests
-
-    @Test func vm_progressIsZeroWhenDailyGoalIsZero() throws {
-        let container = try TestHelpers.makeContainer()
-        let defaults = TestHelpers.makeDefaults()
-        defaults.set(0.0, forKey: WaterSettings.dailyGoalKey)
-
-        // dailyGoal init guard: storedGoal > 0 ? storedGoal : default
-        // So setting 0 should fall back to default (64)
-        let vm = TodayViewModel(modelContext: container.mainContext, defaults: defaults)
-        #expect(vm.dailyGoal == WaterSettings.defaultDailyGoal)
-        #expect(vm.progress == 0.0)
-    }
-
-    @Test func vm_progressGuardsAgainstManualZeroGoal() throws {
-        let (vm, _keepAlive) = try makeVM()
-        vm.dailyGoal = 0.0
-        vm.logWater()
-        // progress computed property has guard: dailyGoal > 0 else return 0.0
-        #expect(vm.progress == 0.0)
-        _ = _keepAlive
-    }
-
-    @Test func vm_logWaterWithZeroServingSize() throws {
-        let (vm, _keepAlive) = try makeVM()
-        vm.servingSize = 0.0
-        vm.logWater()
-        // Should create an entry with amount 0
-        #expect(vm.todayTotal == 0.0)
-        #expect(vm.todayEntries.count == 1)
-        #expect(vm.todayEntries.first?.amount == 0.0)
-        _ = _keepAlive
-    }
-
-    @Test func vm_logWaterWithNegativeServingSize() throws {
-        let (vm, _keepAlive) = try makeVM()
-        vm.servingSize = -5.0
-        vm.logWater()
-        // Currently no validation — records negative amount
-        #expect(vm.todayTotal == -5.0)
-        #expect(vm.todayEntries.count == 1)
-        _ = _keepAlive
-    }
-
-    @Test func vm_goalMetWhenDailyGoalIsZero() throws {
-        let (vm, _keepAlive) = try makeVM()
-        vm.dailyGoal = 0.0
-        // todayTotal (0) >= dailyGoal (0) is true
-        #expect(vm.goalMet == true)
-        _ = _keepAlive
-    }
-
-    @Test func vm_veryLargeAmount() throws {
-        let (vm, _keepAlive) = try makeVM()
-        vm.servingSize = 1_000_000.0
-        vm.logWater()
-        #expect(vm.todayTotal == 1_000_000.0)
-        #expect(vm.progress == 1.0) // capped at 1.0
-        _ = _keepAlive
-    }
-
-    @Test func vm_fractionalAmountDisplayFormat() throws {
-        let container = try TestHelpers.makeContainer()
-        let context = container.mainContext
-        let defaults = TestHelpers.makeDefaults()
-
-        let vm = TodayViewModel(modelContext: context, defaults: defaults)
-        vm.servingSize = 8.5
-        vm.logWater()
-        // 8.5 is not a whole number, so it should format with one decimal
-        #expect(vm.todayTotalDisplay == "8.5")
-    }
-
-    @Test func vm_negativeGoalInDefaultsFallsBackToDefault() throws {
-        let container = try TestHelpers.makeContainer()
-        let defaults = TestHelpers.makeDefaults()
-        defaults.set(-10.0, forKey: WaterSettings.dailyGoalKey)
-        defaults.set(-5.0, forKey: WaterSettings.servingSizeKey)
-
-        // Negative values fail the > 0 check, should fall back to defaults
-        let vm = TodayViewModel(modelContext: container.mainContext, defaults: defaults)
-        #expect(vm.dailyGoal == WaterSettings.defaultDailyGoal)
-        #expect(vm.servingSize == WaterSettings.defaultServingSize)
-    }
-
-    @Test func history_addEntryWithZeroAmount() throws {
-        let (hvm, _keepAlive) = try makeHistoryVM()
-        hvm.addEntry(amount: 0.0)
-        hvm.refresh()
-        #expect(hvm.daySummaries.count == 1)
-        #expect(hvm.daySummaries.first?.total == 0.0)
-        #expect(hvm.daySummaries.first?.entries.count == 1)
-        _ = _keepAlive
-    }
-
-    @Test func history_addEntryWithNegativeAmount() throws {
-        let (hvm, _keepAlive) = try makeHistoryVM()
-        hvm.addEntry(amount: -8.0)
-        hvm.refresh()
-        #expect(hvm.daySummaries.count == 1)
-        #expect(hvm.daySummaries.first?.total == -8.0)
-        _ = _keepAlive
-    }
-
-    // MARK: - Settings round-trip persistence
-
-    @Test func vm_settingsFullRoundTrip() throws {
-        let container = try TestHelpers.makeContainer()
-        let defaults = TestHelpers.makeDefaults()
-
-        // Create first VM and change settings
-        let vm1 = TodayViewModel(modelContext: container.mainContext, defaults: defaults)
-        vm1.dailyGoal = 128.0
-        vm1.servingSize = 16.0
-
-        // Create a brand new VM with the same defaults — settings should persist
-        let vm2 = TodayViewModel(modelContext: container.mainContext, defaults: defaults)
-        #expect(vm2.dailyGoal == 128.0)
-        #expect(vm2.servingSize == 16.0)
-    }
-
-    @Test func vm_settingsRoundTripPreservesNonDefaultValues() throws {
-        let container = try TestHelpers.makeContainer()
-        let defaults = TestHelpers.makeDefaults()
-
-        // Set unusual values
-        let vm1 = TodayViewModel(modelContext: container.mainContext, defaults: defaults)
-        vm1.dailyGoal = 99.5
-        vm1.servingSize = 3.3
-
-        // New VM loads the same fractional values
-        let vm2 = TodayViewModel(modelContext: container.mainContext, defaults: defaults)
-        #expect(vm2.dailyGoal == 99.5)
-        #expect(vm2.servingSize == 3.3)
-    }
-
-    @Test func vm_settingsRoundTripMultipleChanges() throws {
-        let container = try TestHelpers.makeContainer()
-        let defaults = TestHelpers.makeDefaults()
-
-        // Change settings multiple times — only the last value should persist
-        let vm1 = TodayViewModel(modelContext: container.mainContext, defaults: defaults)
-        vm1.dailyGoal = 32.0
-        vm1.dailyGoal = 48.0
-        vm1.dailyGoal = 100.0
-        vm1.servingSize = 4.0
-        vm1.servingSize = 12.0
-
-        let vm2 = TodayViewModel(modelContext: container.mainContext, defaults: defaults)
-        #expect(vm2.dailyGoal == 100.0)
-        #expect(vm2.servingSize == 12.0)
-    }
-
-    // MARK: - SleepNight: Computed properties
-
-    @Test func sleepNight_timeInBed() {
-        let start = Date(timeIntervalSince1970: 0)
-        let end = Date(timeIntervalSince1970: 8 * 3600)
-        let night = SleepNight(
-            date: Calendar.current.startOfDay(for: end),
-            inBedInterval: DateInterval(start: start, end: end),
-            totalSleepDuration: 7 * 3600,
-            stages: nil
-        )
-        #expect(night.timeInBed == 8 * 3600)
-    }
-
-    @Test func sleepNight_efficiency() {
-        let start = Date(timeIntervalSince1970: 0)
-        let end = Date(timeIntervalSince1970: 8 * 3600)
-        let night = SleepNight(
-            date: Calendar.current.startOfDay(for: end),
-            inBedInterval: DateInterval(start: start, end: end),
-            totalSleepDuration: 7 * 3600,
-            stages: nil
-        )
-        #expect(night.efficiency == 7.0 / 8.0)
-    }
-
-    @Test func sleepNight_efficiencyZeroWhenNoTimeInBed() {
-        let date = Date(timeIntervalSince1970: 0)
-        let night = SleepNight(
-            date: date,
-            inBedInterval: DateInterval(start: date, end: date),
-            totalSleepDuration: 0,
-            stages: nil
-        )
-        #expect(night.efficiency == 0)
-    }
-
-    // MARK: - TimeInterval: Sleep formatting
-
-    @Test func sleepFormatted_hoursAndMinutes() {
-        let interval: TimeInterval = 7 * 3600 + 32 * 60
-        #expect(interval.sleepFormatted == "7h 32m")
-    }
-
-    @Test func sleepFormatted_minutesOnly() {
-        let interval: TimeInterval = 45 * 60
-        #expect(interval.sleepFormatted == "45m")
-    }
-
-    @Test func sleepFormatted_zero() {
-        let interval: TimeInterval = 0
-        #expect(interval.sleepFormatted == "0m")
-    }
-
-    @Test func sleepFormatted_exactHours() {
-        let interval: TimeInterval = 8 * 3600
-        #expect(interval.sleepFormatted == "8h 0m")
-    }
-
-    // MARK: - SleepAggregator: Basic
-
-    @Test func aggregator_emptyInput() {
-        let result = SleepAggregator.aggregate([])
-        #expect(result.isEmpty)
-    }
-
-    @Test func aggregator_singleNightUnspecified() {
-        let cal = Calendar.current
-        let bedtime = cal.date(from: DateComponents(year: 2026, month: 2, day: 15, hour: 23, minute: 0))!
-        let wakeup = cal.date(from: DateComponents(year: 2026, month: 2, day: 16, hour: 7, minute: 0))!
-
-        let samples = [
-            RawSleepSample(startDate: bedtime, endDate: wakeup, category: .asleepUnspecified)
-        ]
-
-        let result = SleepAggregator.aggregate(samples)
-        #expect(result.count == 1)
-        let duration: Double = result.first?.totalSleepDuration ?? -1
-        #expect(duration == 28800.0) // 8 * 3600
-    }
-
-    @Test func aggregator_assignsToWakeUpDay() {
-        let cal = Calendar.current
-        // Sunday night -> Monday morning
-        let bedtime = cal.date(from: DateComponents(year: 2026, month: 3, day: 1, hour: 23, minute: 14))!
-        let wakeup = cal.date(from: DateComponents(year: 2026, month: 3, day: 2, hour: 6, minute: 46))!
-
-        let samples = [
-            RawSleepSample(startDate: bedtime, endDate: wakeup, category: .asleepUnspecified)
-        ]
-
-        let result = SleepAggregator.aggregate(samples)
-        let expectedDate = cal.date(from: DateComponents(year: 2026, month: 3, day: 2))!
-        #expect(result.first?.date == expectedDate)
-    }
-
-    // MARK: - SleepAggregator: Stages
-
-    @Test func aggregator_withStages() {
-        let cal = Calendar.current
-        let base = cal.date(from: DateComponents(year: 2026, month: 3, day: 1, hour: 23, minute: 0))!
-
-        let samples = [
-            RawSleepSample(startDate: base, endDate: base.addingTimeInterval(2 * 3600), category: .asleepCore),
-            RawSleepSample(startDate: base.addingTimeInterval(2 * 3600), endDate: base.addingTimeInterval(3.5 * 3600), category: .asleepDeep),
-            RawSleepSample(startDate: base.addingTimeInterval(3.5 * 3600), endDate: base.addingTimeInterval(5 * 3600), category: .asleepREM),
-            RawSleepSample(startDate: base.addingTimeInterval(5 * 3600), endDate: base.addingTimeInterval(5.5 * 3600), category: .awake),
-            RawSleepSample(startDate: base.addingTimeInterval(5.5 * 3600), endDate: base.addingTimeInterval(8 * 3600), category: .asleepCore),
-        ]
-
-        let result = SleepAggregator.aggregate(samples)
-        #expect(result.count == 1)
-
-        let night = result.first!
-        #expect(night.stages != nil)
-        #expect(night.stages!.core == 4.5 * 3600) // 2h + 2.5h
-        #expect(night.stages!.deep == 1.5 * 3600)
-        #expect(night.stages!.rem == 1.5 * 3600)
-        #expect(night.stages!.awake == 0.5 * 3600)
-
-        // totalSleep = core + deep + rem (not awake)
-        let expectedSleep = 4.5 * 3600 + 1.5 * 3600 + 1.5 * 3600
-        #expect(night.totalSleepDuration == expectedSleep)
-    }
-
-    @Test func aggregator_noStagesWhenOnlyUnspecified() {
-        let cal = Calendar.current
-        let bedtime = cal.date(from: DateComponents(year: 2026, month: 3, day: 1, hour: 23, minute: 0))!
-        let wakeup = cal.date(from: DateComponents(year: 2026, month: 3, day: 2, hour: 7, minute: 0))!
-
-        let samples = [
-            RawSleepSample(startDate: bedtime, endDate: wakeup, category: .asleepUnspecified)
-        ]
-
-        let result = SleepAggregator.aggregate(samples)
-        #expect(result.first?.stages == nil)
-    }
-
-    @Test func aggregator_inBedDoesNotCountAsSleep() {
-        let cal = Calendar.current
-        let inBedStart = cal.date(from: DateComponents(year: 2026, month: 2, day: 15, hour: 22, minute: 30))!
-        let asleepStart = cal.date(from: DateComponents(year: 2026, month: 2, day: 15, hour: 23, minute: 0))!
-        let end = cal.date(from: DateComponents(year: 2026, month: 2, day: 16, hour: 7, minute: 0))!
-
-        let samples = [
-            RawSleepSample(startDate: inBedStart, endDate: asleepStart, category: .inBed),
-            RawSleepSample(startDate: asleepStart, endDate: end, category: .asleepUnspecified),
-        ]
-
-        let result = SleepAggregator.aggregate(samples)
-        #expect(result.count == 1)
-        // Sleep = 8h (23:00 to 07:00), not 8.5h
-        let sleepDuration: Double = result.first?.totalSleepDuration ?? -1
-        #expect(sleepDuration == 28800.0) // 8 * 3600
-        // Time in bed includes the inBed period = 8.5h
-        let inBed: Double = result.first?.timeInBed ?? -1
-        #expect(inBed == 30600.0) // 8.5 * 3600
-    }
-
-    // MARK: - SleepAggregator: Nap filtering
-
-    @Test func aggregator_filtersOutNaps() {
-        let cal = Calendar.current
-        let napStart = cal.date(from: DateComponents(year: 2026, month: 3, day: 2, hour: 14, minute: 0))!
-        let napEnd = cal.date(from: DateComponents(year: 2026, month: 3, day: 2, hour: 15, minute: 30))!
-
-        let samples = [
-            RawSleepSample(startDate: napStart, endDate: napEnd, category: .asleepUnspecified)
-        ]
-
-        let result = SleepAggregator.aggregate(samples)
-        #expect(result.isEmpty) // filtered out (< 3 hours)
-    }
-
-    @Test func aggregator_keepsSleepJustOver3Hours() {
-        let cal = Calendar.current
-        let bedtime = cal.date(from: DateComponents(year: 2026, month: 3, day: 2, hour: 2, minute: 0))!
-        let wakeup = cal.date(from: DateComponents(year: 2026, month: 3, day: 2, hour: 5, minute: 1))!
-
-        let samples = [
-            RawSleepSample(startDate: bedtime, endDate: wakeup, category: .asleepUnspecified)
-        ]
-
-        let result = SleepAggregator.aggregate(samples)
-        #expect(result.count == 1)
-    }
-
-    // MARK: - SleepAggregator: Multiple nights
-
-    @Test func aggregator_separatesMultipleNights() {
-        let cal = Calendar.current
-        let night1Start = cal.date(from: DateComponents(year: 2026, month: 3, day: 1, hour: 23, minute: 0))!
-        let night1End = cal.date(from: DateComponents(year: 2026, month: 3, day: 2, hour: 7, minute: 0))!
-        let night2Start = cal.date(from: DateComponents(year: 2026, month: 3, day: 2, hour: 23, minute: 0))!
-        let night2End = cal.date(from: DateComponents(year: 2026, month: 3, day: 3, hour: 6, minute: 30))!
-
-        let samples = [
-            RawSleepSample(startDate: night1Start, endDate: night1End, category: .asleepUnspecified),
-            RawSleepSample(startDate: night2Start, endDate: night2End, category: .asleepUnspecified),
-        ]
-
-        let result = SleepAggregator.aggregate(samples)
-        #expect(result.count == 2)
-        // Newest first
-        #expect(result[0].date > result[1].date)
-    }
-
-    @Test func aggregator_mergesAdjacentSamplesIntoOneNight() {
-        let cal = Calendar.current
-        let base = cal.date(from: DateComponents(year: 2026, month: 3, day: 1, hour: 23, minute: 0))!
-
-        // Two samples 10 minutes apart — same session
-        let samples = [
-            RawSleepSample(startDate: base, endDate: base.addingTimeInterval(4 * 3600), category: .asleepCore),
-            RawSleepSample(startDate: base.addingTimeInterval(4 * 3600 + 600), endDate: base.addingTimeInterval(8 * 3600), category: .asleepDeep),
-        ]
-
-        let result = SleepAggregator.aggregate(samples)
-        #expect(result.count == 1) // merged into one night
-    }
-
-    @Test func aggregator_splitsSamplesWithLargeGap() {
-        let cal = Calendar.current
-        let session1Start = cal.date(from: DateComponents(year: 2026, month: 3, day: 1, hour: 23, minute: 0))!
-        let session1End = cal.date(from: DateComponents(year: 2026, month: 3, day: 2, hour: 3, minute: 0))!
-        // 2-hour gap (> 30 min threshold)
-        let session2Start = cal.date(from: DateComponents(year: 2026, month: 3, day: 2, hour: 5, minute: 0))!
-        let session2End = cal.date(from: DateComponents(year: 2026, month: 3, day: 2, hour: 8, minute: 30))!
-
-        let samples = [
-            RawSleepSample(startDate: session1Start, endDate: session1End, category: .asleepUnspecified),
-            RawSleepSample(startDate: session2Start, endDate: session2End, category: .asleepUnspecified),
-        ]
-
-        let result = SleepAggregator.aggregate(samples)
-        // Each session is >= 3h, so both are primary sleep? session1 = 4h, session2 = 3.5h
-        #expect(result.count == 2)
-    }
-
-    // MARK: - HistoryViewModel + Sleep: Merge
-
-    @Test func history_sleepMergesWithWater() async throws {
-        let container = try TestHelpers.makeContainer()
-        let context = container.mainContext
-        let mock = MockHealthKitService()
-
-        let cal = Calendar.current
-        let today = cal.startOfDay(for: .now)
-
-        // Water entry for today
-        context.insert(WaterEntry(amount: 16.0))
-        try context.save()
-
-        // Sleep for today
-        mock.mockSleepNights = [makeSleepNight(for: today)]
-
-        let hvm = HistoryViewModel(modelContext: context, healthService: mock)
-        await hvm.refreshWithSleep()
-
-        #expect(hvm.daySummaries.count == 1)
-        #expect(hvm.daySummaries.first?.sleepNight != nil)
-        #expect(hvm.daySummaries.first?.entries.count == 1)
-        #expect(hvm.daySummaries.first?.total == 16.0)
-    }
-
-    @Test func history_sleepOnlyDay() async throws {
-        let container = try TestHelpers.makeContainer()
-        let context = container.mainContext
-        let mock = MockHealthKitService()
-
-        let cal = Calendar.current
-        let yesterday = cal.date(byAdding: .day, value: -1, to: cal.startOfDay(for: .now))!
-
-        // No water entries, just sleep
-        mock.mockSleepNights = [makeSleepNight(for: yesterday)]
-
-        let hvm = HistoryViewModel(modelContext: context, healthService: mock)
-        await hvm.refreshWithSleep()
-
-        #expect(hvm.daySummaries.count == 1)
-        #expect(hvm.daySummaries.first?.sleepNight != nil)
-        #expect(hvm.daySummaries.first?.entries.isEmpty == true)
-        #expect(hvm.daySummaries.first?.total == 0.0)
-    }
-
-    @Test func history_waterOnlyDayHasNilSleep() async throws {
-        let container = try TestHelpers.makeContainer()
-        let context = container.mainContext
-        let mock = MockHealthKitService()
-
-        // Water but no sleep
-        context.insert(WaterEntry(amount: 8.0))
-        try context.save()
-
-        mock.mockSleepNights = [] // no sleep data
-
-        let hvm = HistoryViewModel(modelContext: context, healthService: mock)
-        await hvm.refreshWithSleep()
-
-        #expect(hvm.daySummaries.count == 1)
-        #expect(hvm.daySummaries.first?.sleepNight == nil)
-        #expect(hvm.daySummaries.first?.entries.count == 1)
-    }
-
-    @Test func history_sleepAndWaterOnDifferentDays() async throws {
-        let container = try TestHelpers.makeContainer()
-        let context = container.mainContext
-        let mock = MockHealthKitService()
-
-        let cal = Calendar.current
-        let today = cal.startOfDay(for: .now)
-        let yesterday = cal.date(byAdding: .day, value: -1, to: today)!
-
-        // Water today
-        context.insert(WaterEntry(amount: 12.0))
-        try context.save()
-
-        // Sleep yesterday
-        mock.mockSleepNights = [makeSleepNight(for: yesterday)]
-
-        let hvm = HistoryViewModel(modelContext: context, healthService: mock)
-        await hvm.refreshWithSleep()
-
-        #expect(hvm.daySummaries.count == 2)
-        // Today: water only
-        let todaySummary = hvm.daySummaries.first(where: { $0.date == today })
-        #expect(todaySummary?.entries.count == 1)
-        #expect(todaySummary?.sleepNight == nil)
-        // Yesterday: sleep only
-        let yesterdaySummary = hvm.daySummaries.first(where: { $0.date == yesterday })
-        #expect(yesterdaySummary?.entries.isEmpty == true)
-        #expect(yesterdaySummary?.sleepNight != nil)
-    }
-
-    // MARK: - HistoryViewModel + Sleep: Authorization
-
-    @Test func history_healthKitUnavailable() async throws {
-        let container = try TestHelpers.makeContainer()
-        let context = container.mainContext
-        let mock = MockHealthKitService()
-        mock.isAvailable = false
-
-        let hvm = HistoryViewModel(modelContext: context, healthService: mock)
-        await hvm.refreshWithSleep()
-
-        #expect(hvm.healthAuthStatus == .unavailable)
-        #expect(mock.authorizationRequested == false)
-    }
-
-    @Test func history_requestsAuthorizationOnFirstLoad() async throws {
-        let container = try TestHelpers.makeContainer()
-        let context = container.mainContext
-        let mock = MockHealthKitService()
-
-        let hvm = HistoryViewModel(modelContext: context, healthService: mock)
-        await hvm.refreshWithSleep()
-
-        #expect(mock.authorizationRequested == true)
-        #expect(hvm.healthAuthStatus == .requested)
-    }
-
-    @Test func history_authorizationRequestedOnlyOnce() async throws {
-        let container = try TestHelpers.makeContainer()
-        let context = container.mainContext
-        let mock = MockHealthKitService()
-
-        let hvm = HistoryViewModel(modelContext: context, healthService: mock)
-        await hvm.refreshWithSleep()
-        mock.authorizationRequested = false // reset
-
-        await hvm.refreshWithSleep()
-        #expect(mock.authorizationRequested == false) // not requested again
-    }
-
-    // MARK: - HistoryViewModel + Sleep: Error handling
-
-    @Test func history_sleepFetchFailureStillShowsWater() async throws {
-        let container = try TestHelpers.makeContainer()
-        let context = container.mainContext
-        let mock = MockHealthKitService()
-        mock.shouldThrowOnFetch = true
-
-        context.insert(WaterEntry(amount: 20.0))
-        try context.save()
-
-        let hvm = HistoryViewModel(modelContext: context, healthService: mock)
-        await hvm.refreshWithSleep()
-
-        // Water still shows despite sleep fetch failure
-        #expect(hvm.daySummaries.count == 1)
-        #expect(hvm.daySummaries.first?.total == 20.0)
-        #expect(hvm.daySummaries.first?.sleepNight == nil)
-    }
-
-    @Test func history_authFailureStillShowsWater() async throws {
-        let container = try TestHelpers.makeContainer()
-        let context = container.mainContext
-        let mock = MockHealthKitService()
-        mock.shouldThrowOnAuth = true
-
-        context.insert(WaterEntry(amount: 8.0))
-        try context.save()
-
-        let hvm = HistoryViewModel(modelContext: context, healthService: mock)
-        await hvm.refreshWithSleep()
-
-        // Water still shows despite auth failure
-        #expect(hvm.daySummaries.count == 1)
-        #expect(hvm.daySummaries.first?.total == 8.0)
-    }
-
-    // MARK: - HistoryViewModel + Sleep: No health service (backward compat)
-
-    @Test func history_noHealthServiceSkipsSleep() throws {
-        let container = try TestHelpers.makeContainer()
-        let context = container.mainContext
-
-        context.insert(WaterEntry(amount: 8.0))
-        try context.save()
-
-        // No health service — matches existing behavior
-        let hvm = HistoryViewModel(modelContext: context)
-        hvm.refresh()
-
-        #expect(hvm.daySummaries.count == 1)
-        #expect(hvm.daySummaries.first?.sleepNight == nil)
-        #expect(hvm.daySummaries.first?.total == 8.0)
-    }
-
+    // =========================================================================
     // MARK: - Helpers
+    // =========================================================================
 
-    /// Returns (TodayViewModel, ModelContainer). The container MUST be kept alive
-    /// for the test's duration — ModelContext holds a weak reference to it.
-    private func makeVM() throws -> (TodayViewModel, ModelContainer) {
-        let container = try TestHelpers.makeContainer()
-        let vm = TodayViewModel(modelContext: container.mainContext, defaults: TestHelpers.makeDefaults())
-        return (vm, container)
-    }
-
-    /// Returns (HistoryViewModel, ModelContainer). The container MUST be kept alive.
-    private func makeHistoryVM() throws -> (HistoryViewModel, ModelContainer) {
-        let container = try TestHelpers.makeContainer()
-        let hvm = HistoryViewModel(modelContext: container.mainContext)
-        return (hvm, container)
-    }
-
-    /// Creates a test SleepNight for a given date with reasonable defaults.
-    private func makeSleepNight(for date: Date, totalSleep: TimeInterval = 7.5 * 3600) -> SleepNight {
-        let cal = Calendar.current
-        let bedtime = cal.date(byAdding: .hour, value: -8, to: cal.date(byAdding: .hour, value: 7, to: date)!)!
-        let wakeup = cal.date(byAdding: .hour, value: 7, to: date)!
-        return SleepNight(
-            date: date,
-            inBedInterval: DateInterval(start: bedtime, end: wakeup),
-            totalSleepDuration: totalSleep,
-            stages: SleepStages(core: 3.5 * 3600, deep: 1.5 * 3600, rem: 2 * 3600, awake: 0.5 * 3600)
-        )
+    /// Convenience to create a date with explicit components.
+    private func date(_ year: Int, _ month: Int, _ day: Int, _ hour: Int, _ minute: Int) -> Date {
+        Calendar.current.date(from: DateComponents(year: year, month: month, day: day, hour: hour, minute: minute))!
     }
 }

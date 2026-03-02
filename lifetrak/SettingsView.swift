@@ -1,8 +1,11 @@
 import SwiftUI
+import SwiftData
 
 struct SettingsView: View {
-    @AppStorage(WaterSettings.dailyGoalKey) private var dailyGoal: Double = WaterSettings.defaultDailyGoal
-    @AppStorage(WaterSettings.servingSizeKey) private var servingSize: Double = WaterSettings.defaultServingSize
+    @Environment(\.modelContext) private var modelContext
+    @State private var dailyGoal: Double = 64.0
+    @State private var servingSize: Double = 8.0
+    @State private var loaded = false
 
     var body: some View {
         NavigationStack {
@@ -15,6 +18,9 @@ struct SettingsView: View {
                             .keyboardType(.decimalPad)
                             .multilineTextAlignment(.trailing)
                             .frame(width: 80)
+                            .onChange(of: dailyGoal) { _, newValue in
+                                updateGoal(newValue)
+                            }
                         Text("oz")
                             .foregroundStyle(.secondary)
                     }
@@ -26,6 +32,9 @@ struct SettingsView: View {
                             .keyboardType(.decimalPad)
                             .multilineTextAlignment(.trailing)
                             .frame(width: 80)
+                            .onChange(of: servingSize) { _, newValue in
+                                updateServingSize(newValue)
+                            }
                         Text("oz")
                             .foregroundStyle(.secondary)
                     }
@@ -37,17 +46,74 @@ struct SettingsView: View {
 
                 Section {
                     Button("Reset to Defaults") {
-                        dailyGoal = WaterSettings.defaultDailyGoal
-                        servingSize = WaterSettings.defaultServingSize
+                        dailyGoal = 64.0
+                        servingSize = 8.0
+                        updateGoal(64.0)
+                        updateServingSize(8.0)
                     }
                     .foregroundStyle(.red)
                 }
             }
             .navigationTitle("Settings")
+            .onAppear {
+                if !loaded {
+                    loadSettings()
+                    loaded = true
+                }
+            }
         }
+    }
+
+    // MARK: - Data Access
+
+    private func loadSettings() {
+        // Load current daily goal from default routine
+        if let routine = fetchDefaultRoutine(),
+           let water = fetchWaterActivity() {
+            let waterID = water.persistentModelID
+            if let goal = routine.goals.first(where: { $0.activity?.persistentModelID == waterID }) {
+                dailyGoal = goal.targetQuantity ?? 64.0
+            }
+        }
+
+        // Load serving size from water activity
+        if let water = fetchWaterActivity() {
+            servingSize = water.defaultQuantity ?? 8.0
+        }
+    }
+
+    private func updateGoal(_ newGoal: Double) {
+        guard let routine = fetchDefaultRoutine(),
+              let water = fetchWaterActivity() else { return }
+        let waterID = water.persistentModelID
+        if let goal = routine.goals.first(where: { $0.activity?.persistentModelID == waterID }) {
+            goal.targetQuantity = newGoal
+        }
+        try? modelContext.save()
+    }
+
+    private func updateServingSize(_ newSize: Double) {
+        guard let water = fetchWaterActivity() else { return }
+        water.defaultQuantity = newSize
+        try? modelContext.save()
+    }
+
+    private func fetchDefaultRoutine() -> Routine? {
+        let descriptor = FetchDescriptor<Routine>(
+            predicate: #Predicate<Routine> { $0.isDefault == true && $0.isSnapshot == false }
+        )
+        return try? modelContext.fetch(descriptor).first
+    }
+
+    private func fetchWaterActivity() -> Activity? {
+        let descriptor = FetchDescriptor<Activity>(
+            predicate: #Predicate<Activity> { $0.name == "Drink Water" }
+        )
+        return try? modelContext.fetch(descriptor).first
     }
 }
 
 #Preview {
     SettingsView()
+        .modelContainer(for: [Activity.self, Event.self, Routine.self, Goal.self, RoutineSchedule.self, WaterEntry.self], inMemory: true)
 }

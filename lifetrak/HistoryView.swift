@@ -5,7 +5,7 @@ struct HistoryView: View {
     @Environment(\.modelContext) private var modelContext
     @State private var viewModel: HistoryViewModel?
     @State private var showingAddSheet = false
-    @State private var editingEntry: WaterEntry?
+    @State private var editingEntry: Event?
 
     var body: some View {
         NavigationStack {
@@ -85,11 +85,11 @@ struct HistoryView: View {
     }
 
     @ViewBuilder
-    private func entryRow(_ entry: WaterEntry) -> some View {
+    private func entryRow(_ entry: Event) -> some View {
         HStack {
             Image(systemName: "drop.fill")
                 .foregroundStyle(.blue)
-            Text("\(formatAmount(entry.amount)) oz")
+            Text("\(formatAmount(entry.quantity ?? 0)) oz")
                 .font(.body)
             Spacer()
             Text(entry.timestamp, format: .dateTime.hour().minute())
@@ -165,16 +165,16 @@ struct AddEntrySheet: View {
 
 struct EditEntrySheet: View {
     let viewModel: HistoryViewModel
-    let entry: WaterEntry
+    let entry: Event
     @Environment(\.dismiss) private var dismiss
 
     @State private var amount: Double
     @State private var timestamp: Date
 
-    init(viewModel: HistoryViewModel, entry: WaterEntry) {
+    init(viewModel: HistoryViewModel, entry: Event) {
         self.viewModel = viewModel
         self.entry = entry
-        self._amount = State(initialValue: entry.amount)
+        self._amount = State(initialValue: entry.quantity ?? 0)
         self._timestamp = State(initialValue: entry.timestamp)
     }
 
@@ -214,5 +214,5 @@ struct EditEntrySheet: View {
 
 #Preview {
     HistoryView()
-        .modelContainer(for: WaterEntry.self, inMemory: true)
+        .modelContainer(for: [Activity.self, Event.self, Routine.self, Goal.self, RoutineSchedule.self, WaterEntry.self], inMemory: true)
 }
