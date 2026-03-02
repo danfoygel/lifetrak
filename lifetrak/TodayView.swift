@@ -147,7 +147,7 @@ struct TodayView: View {
                 AxisMarks(position: .leading)
             }
             .chartXAxis {
-                AxisMarks(values: .stride(by: .day)) { value in
+                AxisMarks(values: .stride(by: .day)) { _ in
                     AxisValueLabel(format: .dateTime.weekday(.abbreviated))
                 }
             }
@@ -185,7 +185,7 @@ struct TodayView: View {
                     HStack {
                         Image(systemName: "drop.fill")
                             .foregroundStyle(.blue)
-                        Text("\(formatAmount(entry.amount)) oz")
+                        Text("\(formatAmount(entry.quantity ?? 0)) oz")
                             .font(.body)
                         Spacer()
                         Text(entry.timestamp, format: .dateTime.hour().minute())
@@ -254,17 +254,7 @@ struct CelebrationOverlay: View {
     }
 }
 
-// Expose serving size formatting for the view
-extension TodayViewModel {
-    func formatServingSize() -> String {
-        if servingSize == servingSize.rounded() {
-            return String(Int(servingSize))
-        }
-        return String(format: "%.1f", servingSize)
-    }
-}
-
 #Preview {
     TodayView()
-        .modelContainer(for: WaterEntry.self, inMemory: true)
+        .modelContainer(for: [Activity.self, Event.self, Routine.self, Goal.self, RoutineSchedule.self, WaterEntry.self], inMemory: true)
 }

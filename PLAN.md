@@ -203,7 +203,7 @@ Intentionally flat and simple. We'll add structure as the app grows.
 ## What Comes After the Tracer Round
 
 Once water tracking is solid:
-1. Generalize `WaterEntry` → generic `TrackerEntry` + `TrackerDefinition`
+1. ~~Generalize `WaterEntry` → generic `TrackerEntry` + `TrackerDefinition`~~ → **Replaced by generalized data model (see below)**
 2. Add more tracker types (medications, exercise, etc.)
 3. ~~Apple Health integration~~ → **Next tracer round (see below)**
 4. Cross-tracker analysis and correlations
@@ -664,4 +664,284 @@ Answer: let's keep it simple, last 30 days
 
 Answer: Not sure yet.
 
-	
+---
+
+# Generalized Data Model
+
+## Overview
+
+After the tracer rounds validated the full stack (SwiftData persistence, HealthKit integration, MVVM architecture, mixed-content history), we generalize from water-specific and sleep-specific models to a unified data model built around five core entities: **Activity**, **Event**, **Routine**, **Goal**, and **RoutineSchedule**.
+
+This replaces the earlier plan to generalize `WaterEntry` → `TrackerEntry` + `TrackerDefinition`.
+
+### Naming — HealthKit Conflict Check
+
+| Name | HealthKit overlap | Verdict |
+|------|-------------------|---------|
+| Activity | `HKActivitySummary`, `HKWorkoutActivityType` exist but are `HK`-prefixed. `ActivityKit.Activity` also exists in a separate module. No compile-time clash. | **Safe** — module namespacing prevents conflicts |
+| Event | `HKWorkoutEvent` exists, scoped under "Workout". `UIEvent` in UIKit is a different module. | **Safe** |
+| Routine | No HealthKit types use this term at all. | **Safe** |
+| Goal | No HealthKit types use this term. | **Safe** |
+| RoutineSchedule | No HealthKit types use this term. | **Safe** |
+
+## Core Entities
+
+### Activity
+
+An **Activity** is a defined action that a user tracks. It describes *what* can be tracked, not an individual occurrence.
+
+```swift
+@Model
+class Activity {
+    var name: String                    // "Drink Water", "Pushups", "Bright Light Therapy"
+    var emoji: String                   // "💧", "💪", "☀️"
+    var quantityUnit: String?           // "oz", "count", "mg" — nil if no quantity
+    var tracksDuration: Bool            // true if events have start + end time
+    var defaultQuantity: Double?        // quick-log default (e.g., 8 oz)
+    var source: DataSource              // .manual or .healthKit(.sleepAnalysis)
+    var sortOrder: Int                  // display ordering within the app
+
+    @Relationship(deleteRule: .cascade)
+    var events: [Event] = []
+
+    @Relationship(deleteRule: .nullify, inverse: \Goal.activity)
+    var goals: [Goal] = []
+}
+
+enum DataSource: Codable {
+    case manual                          // user logs via the app
+    case healthKit(String)               // auto-populated from HealthKit (type identifier)
+}
+```
+
+**Key properties:**
+- `quantityUnit` — if nil, the activity is occurrence-only (e.g., "took medication" — just log that it happened)
+- `tracksDuration` — if true, events have both start and end timestamps (e.g., meditation, bright light therapy)
+- `defaultQuantity` — enables quick-log (tap once to log the default amount)
+- `source` — distinguishes manually logged activities from HealthKit-sourced ones. HealthKit activities have their events auto-populated.
+
+**Examples:**
+
+| Activity | quantityUnit | tracksDuration | defaultQuantity | source |
+|----------|-------------|----------------|-----------------|--------|
+| Drink Water | "oz" | false | 8.0 | .manual |
+| Pushups | "count" | false | nil | .manual |
+| Bright Light Therapy | nil | true | nil | .manual |
+| Take Medication | nil | false | nil | .manual |
+| Sleep | nil | true | nil | .healthKit("sleepAnalysis") |
+| Run | "miles" | true | nil | .manual |
+
+### Event
+
+An **Event** is a single instance of an activity performed at a specific time. This is the core data capture entity.
+
+```swift
+@Model
+class Event {
+    var activity: Activity
+    var timestamp: Date                 // when it happened (or start time if duration)
+    var endTimestamp: Date?             // nil if activity doesn't track duration
+    var quantity: Double?               // nil if activity doesn't track quantity
+
+    /// Duration in seconds, computed from timestamps
+    var duration: TimeInterval? {
+        guard let end = endTimestamp else { return nil }
+        return end.timeIntervalSince(timestamp)
+    }
+}
+```
+
+**Relationship to current models:**
+- `WaterEntry` becomes an Event where `activity.name == "Drink Water"`, `quantity == amount`, `timestamp == timestamp`
+- `SleepNight` becomes one or more Events where `activity.source == .healthKit("sleepAnalysis")`, with `timestamp`/`endTimestamp` for the sleep session
+
+**Quick-log flow:** User taps "Drink Water" → creates an Event with `timestamp = .now`, `quantity = activity.defaultQuantity`, no duration.
+
+**Duration-based flow:** User starts "Bright Light Therapy" → creates an Event with `timestamp = .now`. When they stop, `endTimestamp` is set.
+
+### Routine
+
+A **Routine** is a named set of goals. Routines are editable templates that can be assigned to date ranges. One routine is marked as the default.
+
+When a routine is edited and past days reference it, the system automatically clones the old version (copy-on-write) so that past days are unaffected. These historical clones are hidden from the user.
+
+```swift
+@Model
+class Routine {
+    var name: String                    // "Standard", "Recovery Week", "Travel"
+    var isDefault: Bool                 // exactly one non-snapshot routine is the default
+    var isSnapshot: Bool                // true = historical clone, hidden from routine picker
+
+    @Relationship(deleteRule: .cascade)
+    var goals: [Goal] = []
+
+    @Relationship(deleteRule: .nullify, inverse: \RoutineSchedule.routine)
+    var schedules: [RoutineSchedule] = []
+}
+```
+
+**Rules:**
+- Exactly one non-snapshot Routine is marked `isDefault = true` at any time
+- Routines are freely editable — copy-on-write protects history automatically
+- Snapshot routines are internal implementation details, hidden from the UI
+- A routine with no goals is valid (user is just logging without targets)
+- Routines persist when not active — you can switch back to "Travel" without recreating it
+
+### RoutineSchedule
+
+A **RoutineSchedule** maps a date range to a Routine. This is how the system knows which routine applies on which days. Conceptually every day has exactly one routine — there is no distinction between "default days" and "override days."
+
+```swift
+@Model
+class RoutineSchedule {
+    var routine: Routine
+    var startDate: Date                 // first day (inclusive)
+    var endDate: Date                   // last day (inclusive)
+}
+```
+
+**Resolution logic** — which routine applies on a given day:
+1. Find any `RoutineSchedule` where `startDate <= day <= endDate`
+2. If found, use that schedule's routine
+3. If not found, use the default Routine
+
+**Rules:**
+- Schedules must not overlap (enforced in business logic)
+- Schedules can cover past or future dates
+- Deleting a schedule reverts those days to the default routine
+- The default routine is just the auto-fill for days without an explicit schedule — no special behavior beyond that
+
+### Copy-on-Write Behavior
+
+Copy-on-write is triggered **at edit time**, not at assignment time. The user never manages snapshots — it just works.
+
+**Example:**
+
+1. "Travel" routine has goals: water 48 oz/day, medication 3x/day
+2. User assigns Travel to May 1–5 (a `RoutineSchedule` is created pointing to Travel)
+3. May 1–5 passes. Those days now reference the Travel routine.
+4. User edits Travel, changing water goal from 48 oz to 32 oz
+5. System detects past RoutineSchedules pointing to Travel → **clones** Travel (with its old goals) as a snapshot → repoints past schedules to the snapshot → applies the edit to Travel
+6. Result: May 1–5 still shows 48 oz (via the hidden snapshot). Future uses of Travel show 32 oz.
+
+**Implementation:**
+- Before saving edits to a Routine, query for any `RoutineSchedule` entries that reference it and have `endDate < today`
+- If any exist: clone the Routine with `isSnapshot = true`, clone its Goals, repoint those past schedules to the clone
+- Then apply the edits to the original Routine
+- Snapshot routines are never shown in the routine picker or settings
+
+### Goal
+
+A **Goal** connects a Routine to an Activity with a specific target. It defines "how much" or "how often" an activity should be performed.
+
+```swift
+@Model
+class Goal {
+    var routine: Routine
+    var activity: Activity
+    var period: GoalPeriod              // .daily or .weekly
+
+    // Target definition — at least one should be set
+    var targetQuantity: Double?         // cumulative target in period (e.g., 64 oz/day)
+    var targetDuration: TimeInterval?   // per-occurrence duration target (e.g., 20 min)
+    var targetFrequency: Int?           // number of occurrences in period (e.g., 5x/week)
+}
+
+enum GoalPeriod: String, Codable {
+    case daily
+    case weekly
+}
+```
+
+**Two target patterns:**
+
+1. **Cumulative** — "drink 64 oz of water per day"
+   - `targetQuantity = 64`, `period = .daily`
+   - Progress = sum of all event quantities in the period / targetQuantity
+
+2. **Frequency + per-occurrence** — "bright light therapy for 20 minutes, 5 times per week"
+   - `targetDuration = 1200` (20 min), `targetFrequency = 5`, `period = .weekly`
+   - Progress = count of qualifying events (duration >= targetDuration) / targetFrequency
+
+**Examples:**
+
+| Goal | targetQuantity | targetDuration | targetFrequency | period |
+|------|---------------|----------------|-----------------|--------|
+| Drink 64 oz water/day | 64 | nil | nil | daily |
+| 5x bright light, 20 min each/week | nil | 1200 | 5 | weekly |
+| Take medication 3x/day | nil | nil | 3 | daily |
+| Run 15 miles/week | 15 | nil | nil | weekly |
+| Do 100 pushups/day | 100 | nil | nil | daily |
+
+## Entity Relationships
+
+```
+RoutineSchedule ──N:1──▶ Routine ──1:N──▶ Goal ──N:1──▶ Activity ──1:N──▶ Event
+(date range)                │                     │
+                            │                     │  "what actually
+                            ├── isDefault          │   happened"
+                            └── isSnapshot         │
+                                (hidden clone)     └── source (.manual / .healthKit)
+```
+
+- A **Routine** has many **Goals**. One non-snapshot routine is the default.
+- A **RoutineSchedule** maps a date range to a Routine.
+- A **Goal** belongs to one Routine, references one Activity.
+- An **Activity** has many **Events** (the actual logged data).
+- On any given day: find a RoutineSchedule covering that day; if none, use the default Routine.
+- Snapshot routines are auto-created by copy-on-write when editing a routine with past schedules.
+
+## HealthKit Integration
+
+HealthKit-sourced activities (sleep, heart rate, steps, workouts) are unified into the same model:
+
+- An **Activity** with `source = .healthKit("sleepAnalysis")` is auto-populated — its Events are created/refreshed by the HealthKit service, not manually logged
+- HealthKit Events are **read-only** in the UI (no edit/delete)
+- The existing `HealthKitServiceProtocol` and `SleepAggregator` continue to work — they just write into the Event model instead of the standalone `SleepNight` struct
+- Future HealthKit types (heart rate, steps, workouts) follow the same pattern: define an Activity with `source = .healthKit(typeIdentifier)`, implement a fetcher, auto-populate Events
+
+## Migration Path
+
+### From Current Code
+
+| Current | Becomes |
+|---------|---------|
+| `WaterEntry` (@Model) | `Event` where activity = "Drink Water" |
+| `SleepNight` (struct) | `Event`(s) where activity.source = .healthKit("sleepAnalysis") |
+| `WaterSettings.dailyGoal` | `Goal` on the default `Routine` |
+| `WaterSettings.servingSize` | `Activity.defaultQuantity` |
+| `DaySummary` | Computed from Events grouped by date + Goals from active Routine |
+
+### Migration strategy
+
+1. Create the new models (Activity, Event, Routine, Goal, RoutineSchedule) alongside existing ones
+2. Write a one-time migration that converts existing WaterEntry records to Events
+3. Create a default "Drink Water" Activity and a default Routine with the existing goal
+4. Update ViewModels to use the new models
+5. Remove `WaterEntry` once migration is verified
+6. Update `SleepNight` aggregation to write into Events instead of standalone structs
+
+## Open Questions
+
+1. **Activity archiving**: When a user stops tracking an activity, should it be deleted (with events) or archived/hidden? Archiving preserves history.
+
+Answer: No need to implement archiving for now.
+
+2. **Routine management UI**: What's the flow for creating/editing routines and schedules? Options:
+   - Settings screen lists saved routines; tap to edit goals; a "Schedule" section shows upcoming schedules
+   - Today screen shows the active routine name with an option to assign a different routine to a date range
+   - Both?
+
+Answer: Both.
+
+3. **HealthKit write-back**: Some HealthKit data types support writing (e.g., water intake can be written to HealthKit). Should manually logged events be written back? This would let Apple Health aggregate data from multiple apps.
+
+Answer: No write-back for now.
+
+4. **Goal progress visualization**: The "rings" concept from the kickoff — should each goal get its own ring? Or group by activity type? This is the gamification/motivation design question.
+
+Answer: We'll work on that in a future session - make a note of it, but we don't need to design it now.
+
+5. **Compound activities**: Some activities combine quantity AND duration (e.g., "run 3 miles in 30 minutes"). The current model supports this (an Event can have both `quantity` and `endTimestamp`), but goals would need to target either the quantity or the duration, not both. Is that sufficient?
+
+Answer: Don't need to support compound activities for now.
