@@ -436,31 +436,9 @@ Fastlane is optional for a personal project but useful if you want scripted rele
 
 ## Cloud CI Options
 
-### Option A: Xcode Cloud (Recommended for personal projects)
+### Option A: GitHub Actions with macOS Runners (Recommended)
 
-Apple's first-party CI service, integrated directly into Xcode and App Store Connect.
-
-**Free tier**: 25 compute hours/month included with any Apple Developer Program membership ($99/year). For a personal project with a modest test suite, this is likely sufficient.
-
-**Advantages**:
-- Zero setup for code signing — Apple handles certificates automatically
-- Runs on Apple Silicon hardware (fast)
-- Natively understands Xcode project structure
-- Results appear directly inside Xcode
-- TestFlight integration built in
-- Xcode and iOS SDK versions stay current
-
-**Limitations**:
-- Cannot run arbitrary shell commands as easily as GitHub Actions
-- HealthKit tests require device-side testing (not possible in Xcode Cloud simulators)
-
-**To set up**: In Xcode → Product → Xcode Cloud → Create Workflow. Select the scheme, set the start condition (on push to main, or on every PR), and add a Test action.
-
-### Option B: GitHub Actions with macOS Runners
-
-The plan already references this. It works but has notable costs and constraints.
-
-**Free tier reality**: GitHub gives 2,000 minutes/month total, but macOS runners consume at **10× the rate** of Linux. In practice you get ~200 actual macOS minutes free per month — enough for a short test suite on every push, but not for long UI test runs.
+Because this is a **public repository**, GitHub Actions macOS runners are **completely free with no minute cap**. The 2,000 min/month limit and the 10× minute multiplier only apply to private repos. This makes GitHub Actions the strongest option here — no cost, no account beyond what you already have, and straightforward YAML configuration.
 
 **Key constraints**:
 - New iOS SDK versions (like iOS 26) have a lag before appearing on GitHub-hosted runners
@@ -501,15 +479,32 @@ jobs:
 
 **Note on snapshot tests in CI**: Snapshot tests are pixel-exact. If your reference snapshots were recorded on a local Apple Silicon Mac and CI uses an Intel runner (or a different simulator scale), the tests will fail due to rendering differences. Solution: record reference snapshots on the CI machine by running with `isRecording = true` in a one-time job, then commit the results.
 
+### Option B: Xcode Cloud
+
+Apple's first-party CI service, integrated directly into Xcode and App Store Connect.
+
+**Cost**: 25 compute hours/month included with an Apple Developer Program membership ($99/year). Since GitHub Actions is already free for this public repo, Xcode Cloud is only worth considering if you specifically want its Apple-native integrations.
+
+**Advantages over GitHub Actions**:
+- Zero code-signing setup — Apple handles certificates automatically
+- Results appear directly inside Xcode
+- TestFlight integration built in
+
+**Disadvantages**:
+- Costs $99/year (the Developer Program membership) to access
+- Less flexible than YAML-based workflows
+- New Xcode/SDK versions can lag on hosted runners just like GitHub Actions
+
+**To set up**: In Xcode → Product → Xcode Cloud → Create Workflow.
+
 ### Option C: Self-Hosted Runner (Mac Mini)
 
 If you have a spare Mac, you can register it as a GitHub Actions self-hosted runner. This gives you:
-- Unlimited minutes at no GitHub cost
 - The exact simulator versions you have locally
 - Apple Silicon performance
 - No code-signing complications
 
-For a personal project this is probably overkill, but worth knowing about as the project grows.
+Since GitHub Actions is already free for this public repo, a self-hosted runner is only useful if the hosted runners don't yet support the iOS SDK version you need (e.g., iOS 26 before Apple updates the runner images).
 
 ### What cannot run in cloud CI
 
@@ -539,7 +534,7 @@ Given the current stack (SwiftUI + SwiftData, Swift Testing, XCUITest), here is 
 
 3. **Add `--uitesting` + `--seed-*` launch argument handling** as soon as the first real view lands — this is the infrastructure that lets all future UI tests be independent and repeatable.
 
-4. **Use Xcode Cloud for CI** — it's free for 25 hours/month with your Developer Program membership, handles code signing automatically, and tracks your iOS SDK version. Set up a workflow that runs `lifetrakTests` on every push to `main`.
+4. **Use GitHub Actions for CI** — because the repo is public, macOS runners are free with no minute cap. Set up a workflow that runs `lifetrakTests` on every push to `main`. Xcode Cloud is not necessary here unless you specifically want its TestFlight or Xcode-native integrations.
 
 5. **Exclude UI tests from CI by default** — UI tests are slow and fragile in CI environments. Run them locally before merging. If you later want CI UI tests, add them as a separate, less-frequent scheduled workflow.
 
