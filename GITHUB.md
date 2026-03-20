@@ -237,6 +237,8 @@ Secret scanning and push protection are both free and enabled by default on publ
 ## 7. Security: Code Scanning (CodeQL)
 
 > **Setup:** Commit the workflow YAML to `.github/workflows/` — no web UI needed. (GitHub's Security tab also offers a point-and-click wizard that generates the same file, but committing it directly is cleaner and keeps it in version control.)
+>
+> **Done:** `.github/workflows/codeql.yml` committed. Runs on push/PR to `main` and weekly on Mondays.
 
 ### What it is
 Static analysis that finds security vulnerabilities and code quality issues in your source code. GitHub's engine is called CodeQL; it understands code semantics, not just patterns, so it catches subtle bugs.
