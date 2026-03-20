@@ -7,7 +7,26 @@ on:
     branches: [main]
 
 jobs:
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      src: ${{ steps.filter.outputs.src }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            src:
+              - 'lifetrak/**'
+              - 'lifetrakTests/**'
+              - 'lifetrakUITests/**'
+              - 'lifetrak.xcodeproj/**'
+              - '.github/workflows/test.yml'
+
   test:
+    needs: changes
+    if: needs.changes.outputs.src == 'true'
     runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
