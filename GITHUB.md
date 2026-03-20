@@ -1,6 +1,6 @@
 # GitHub Features & Best Practices
 
-A research report on native GitHub capabilities worth using in this repo — what each does, why it matters, and any important caveats.
+A research report on native GitHub capabilities worth using in this repo — what each does, why it matters, and any important caveats. Assumes a public repository.
 
 ---
 
@@ -38,14 +38,6 @@ Even for a solo project, CI is valuable because it catches regressions before th
 - **Enforce the build compiles** — catches Swift syntax or type errors that might not surface until you open Xcode
 - **Run on PR, block merge if failing** — keeps `main` always green (pairs with branch protection)
 
-### The macOS cost problem
-This is the most important caveat for iOS development. GitHub-hosted macOS runners cost **$0.08/minute** and are counted at a **10x multiplier** against your free quota (so 2,000 free minutes/month becomes effectively ~200 macOS minutes). A single Xcode build + test run can take 5–15 minutes, meaning you'd exhaust the free tier in roughly 15–40 CI runs per month.
-
-**Practical options:**
-- **Self-hosted runner on your own Mac**: Run the GitHub Actions runner agent on your development machine or a spare Mac. Zero cost, full control over Xcode versions. Takes about an hour to set up. This is the recommended approach for non-trivial iOS CI.
-- **Limit what runs in CI**: Run only fast, non-build checks (linting, YAML validation, etc.) on free GitHub runners, and reserve full builds for local or self-hosted.
-- **Accept the cost**: For a personal project with infrequent PRs, a few dollars/month may be acceptable.
-
 ### Workflow file structure
 ```
 .github/
@@ -54,7 +46,7 @@ This is the most important caveat for iOS development. GitHub-hosted macOS runne
     lint.yml        # SwiftLint or similar
 ```
 
-### Example workflow (self-hosted runner assumed)
+### Example workflow
 ```yaml
 name: CI
 on:
@@ -64,7 +56,7 @@ on:
 
 jobs:
   test:
-    runs-on: self-hosted  # or macos-15 if you accept the cost
+    runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
       - name: Build and Test
@@ -107,7 +99,7 @@ Even solo, branch protection on `main` is valuable:
 - Prevent branch deletion
 
 ### Rulesets vs. branch protection
-Rulesets are strictly more capable and GitHub is investing in them as the future. If you're setting this up fresh, use rulesets. One nuance: rulesets for private repos require at minimum a free personal account (available), but some advanced features require paid plans.
+Rulesets are strictly more capable and GitHub is investing in them as the future. If you're setting this up fresh, use rulesets.
 
 ---
 
@@ -191,16 +183,13 @@ updates:
       interval: "weekly"
 ```
 
-### Free tier
-Dependabot alerts and security updates are **free for all repos** (public and private).
+Dependabot alerts and security updates are free.
 
 ---
 
 ## 6. Security: Secret Scanning
 
-> **Setup — public repos:** Auto-enabled. Nothing to do.
->
-> **Setup — private repos:** Web UI required — Settings → Code security and analysis (paid plan also required, so this is moot until that decision is made).
+> **Setup:** Auto-enabled for public repos. Nothing to do.
 
 ### What it is
 GitHub automatically scans commits for patterns that look like secrets — API keys, tokens, credentials, private keys — and alerts you (and sometimes the affected service) if found.
@@ -211,11 +200,7 @@ Protects against accidentally committing credentials. Even on a personal project
 ### Push protection
 A more proactive mode: GitHub blocks the push entirely if it detects a secret, before it ever enters the repository history. This is significantly better than after-the-fact detection, because once a secret is in git history it's in the history even after you delete it.
 
-### Free tier
-- **Public repos**: Secret scanning and push protection are both free and enabled by default
-- **Private repos**: Secret scanning alerts require GitHub Advanced Security (paid: $19/month/committer as of 2025). Push protection for private repos also requires this
-
-For a private personal project, you get some protection via Actions (you can write a workflow to detect common patterns), but the native feature requires payment.
+Secret scanning and push protection are both free and enabled by default on public repos.
 
 ---
 
@@ -262,11 +247,7 @@ jobs:
       - uses: github/codeql-action/analyze@v3
 ```
 
-### Free tier
-- **Public repos**: Free
-- **Private repos**: Requires GitHub Code Security (paid, part of Advanced Security)
-
-Note: The CodeQL workflow requires a macOS runner for Swift, so the same cost concerns from section 1 apply.
+CodeQL is free for public repos.
 
 ---
 
@@ -351,8 +332,6 @@ The PLAN.md already tracks the roadmap in markdown. GitHub Projects can compleme
 
 For a solo project, this may be more overhead than it's worth unless you find the visual board helpful. Worth trying when the feature backlog grows large enough that a flat list becomes hard to navigate.
 
-### Free tier
-GitHub Projects is free for all accounts.
 
 ---
 
@@ -464,36 +443,24 @@ Lets you define deployment targets (staging, production) with protection rules a
 
 A built-in wiki for documentation. The existing PLAN.md and CLAUDE.md approach in markdown files checked into the repo is generally better — it's versioned, diff-able, and appears in code search. Avoid wikis unless you have a specific need for a separate documentation space.
 
-### GitHub Advanced Security (Paid)
-> **Setup:** Web UI or `gh api` to enable. Paid plan must be active first.
-
-Unlocks code scanning, secret scanning, and dependency review for **private repos**. Priced at $19/month per active committer for Secret Protection, and similarly for Code Security. For a personal private repo, this is likely not cost-justified. If you ever make the repo public, all of these features become free automatically.
-
-### GitHub Enterprise / Team Plan
-GitHub Enterprise Cloud adds features like audit log streaming, SAML SSO, IP allowlisting, and more. GitHub Team adds private repo collaborator features and some additional Actions minutes. Neither is relevant for a solo personal project on a free account.
-
 ---
 
 ## Recommended Priority Order
 
-Given this is a solo personal iOS project currently on the free tier:
-
 **High value, low effort — do these:**
-1. Branch protection rules (or ruleset) on `main`: require PRs and status checks
-2. PR template (`.github/pull_request_template.md`)
-3. `dependabot.yml` — costs nothing, pays off if you ever add packages
-4. `SECURITY.md` — good habit, low effort
-
-**High value, requires decision on CI cost:**
-5. GitHub Actions CI with self-hosted runner — best option if you have a Mac to use as runner
-6. SwiftLint as a lightweight free-tier CI check (no macOS runner needed for linting)
+1. Branch protection (via ruleset) on `main`: require PRs and status checks
+2. GitHub Actions CI — add `.github/workflows/ci.yml` to build and test on every PR
+3. PR template (`.github/pull_request_template.md`)
+4. `dependabot.yml` — pays off when any packages are added
+5. `SECURITY.md` — good habit, low effort
 
 **Medium value, worth exploring:**
-7. GitHub Releases — as you hit milestones, start tagging versions
-8. GitHub Projects — if/when the issue list gets hard to manage
-9. GitHub Copilot free tier — try it, see if completions in Xcode help
+6. SwiftLint as an additional CI check
+7. CodeQL — add the workflow file, results appear in the Security tab
+8. GitHub Releases — as you hit milestones, start tagging versions
+9. GitHub Projects — if/when the issue list gets hard to manage
+10. GitHub Copilot free tier — try it, see if completions in Xcode help
 
 **Learn these practices, apply when relevant:**
-10. Commit signing — adopt when setting up a new machine
-11. CodeQL — enable if repo goes public (it becomes free)
+11. Commit signing — adopt when setting up a new machine
 12. Auto-merge — useful quality-of-life once CI is set up
