@@ -26,6 +26,8 @@ A research report on native GitHub capabilities worth using in this repo — wha
 
 ## 1. CI/CD with GitHub Actions
 
+> **Setup:** Workflow YAML files are committed to `.github/workflows/` — no web UI needed, and version-controlled like any other code. Toggle individual workflows on/off via `gh workflow enable/disable`. **Self-hosted runner** is the exception: it requires physical access to the Mac, running `./config.sh` interactively on that machine (the registration token can be generated via `gh api`, but the runner setup itself is manual, ~1 hour one-time).
+
 ### What it is
 A workflow automation system built into GitHub. You define workflows as YAML files in `.github/workflows/`. Workflows trigger on events (push, PR opened, schedule, etc.) and run sequences of jobs on GitHub-hosted or self-hosted machines.
 
@@ -79,6 +81,10 @@ SwiftLint (open source, no external service needed) can run as an Actions step t
 
 ## 2. Branch Protection & Rulesets
 
+> **Setup — branch protection rules:** No dedicated `gh` command. Use the web UI (Settings → Branches) or script it via `gh api repos/{owner}/{repo}/branches/{branch}/protection` with the REST API. The REST payload is complex JSON; the web UI is much easier for initial setup.
+>
+> **Setup — rulesets:** Fully supported via `gh ruleset` — `gh ruleset create`, `gh ruleset list`, `gh ruleset view`, `gh ruleset check`, `gh ruleset delete`. No web UI required. Rulesets are the better choice if you want automation.
+
 ### What it is
 Rules that govern what can be pushed to specific branches. GitHub has two overlapping systems:
 
@@ -106,6 +112,8 @@ Rulesets are strictly more capable and GitHub is investing in them as the future
 ---
 
 ## 3. Pull Request & Issue Templates
+
+> **Setup:** Commit the files to `.github/` — GitHub detects them automatically. No web UI, no CLI commands needed.
 
 ### What it is
 Markdown templates stored in `.github/` that pre-populate the body of new PRs or issues. GitHub automatically uses them when someone opens a PR or issue.
@@ -135,6 +143,8 @@ Multiple issue templates are supported; GitHub shows a chooser when opening a ne
 
 ## 4. CODEOWNERS
 
+> **Setup:** Commit `.github/CODEOWNERS` — no web UI needed.
+
 ### What it is
 A file (`.github/CODEOWNERS`) that maps file paths or directories to GitHub users or teams. When a PR touches those paths, the named owners are automatically added as reviewers.
 
@@ -154,6 +164,8 @@ lifetrak/Data/       @danfoygel          # data layer
 ---
 
 ## 5. Security: Dependabot
+
+> **Setup:** Commit `.github/dependabot.yml` — GitHub detects it automatically and begins monitoring. No web UI needed.
 
 ### What it is
 A GitHub bot that automatically opens PRs to update your dependencies when new versions are released or when a dependency has a known vulnerability.
@@ -186,6 +198,10 @@ Dependabot alerts and security updates are **free for all repos** (public and pr
 
 ## 6. Security: Secret Scanning
 
+> **Setup — public repos:** Auto-enabled. Nothing to do.
+>
+> **Setup — private repos:** Web UI required — Settings → Code security and analysis (paid plan also required, so this is moot until that decision is made).
+
 ### What it is
 GitHub automatically scans commits for patterns that look like secrets — API keys, tokens, credentials, private keys — and alerts you (and sometimes the affected service) if found.
 
@@ -204,6 +220,8 @@ For a private personal project, you get some protection via Actions (you can wri
 ---
 
 ## 7. Security: Code Scanning (CodeQL)
+
+> **Setup:** Commit the workflow YAML to `.github/workflows/` — no web UI needed. (GitHub's Security tab also offers a point-and-click wizard that generates the same file, but committing it directly is cleaner and keeps it in version control.)
 
 ### What it is
 Static analysis that finds security vulnerabilities and code quality issues in your source code. GitHub's engine is called CodeQL; it understands code semantics, not just patterns, so it catches subtle bugs.
@@ -254,6 +272,8 @@ Note: The CodeQL workflow requires a macOS runner for Swift, so the same cost co
 
 ## 8. GitHub Releases
 
+> **Setup:** Fully via CLI — `gh release create v1.0 --generate-notes`. Can also be automated inside an Actions workflow triggered on tag push. No web UI needed.
+
 ### What it is
 A structured way to publish named versions of your software, with release notes and attached binary artifacts. Releases are built on top of git tags.
 
@@ -270,6 +290,8 @@ You can automate release creation with `gh release create` in a workflow, trigge
 ---
 
 ## 9. Commit Signing (Verified Commits)
+
+> **Setup:** Mostly CLI. Key generation is interactive (`gpg --full-generate-key` or `ssh-keygen`). Upload to GitHub: `gh gpg-key add <keyfile>` for GPG, or `gh ssh-key add <keyfile> --type signing` for SSH signing keys. Local git config is CLI commands (`git config --global user.signingkey ...`). The only "manual" part is the interactive key generation prompt — no web UI required.
 
 ### What it is
 Signing git commits with a GPG or SSH key, which proves the commit actually came from you and wasn't tampered with. GitHub shows a green "Verified" badge on signed commits.
@@ -299,6 +321,10 @@ git config --global commit.gpgsign true
 
 ## 10. Auto-Merge
 
+> **Setup — two steps, different methods:**
+> 1. **Enable the feature on the repo** (one-time): Web UI required — Settings → General → "Allow auto-merge" checkbox. No `gh` command for this.
+> 2. **Enable on a specific PR** (per-PR): CLI — `gh pr merge --auto --squash`.
+
 ### What it is
 A feature that automatically completes a PR merge once all required status checks pass and required reviews are approved. You enable it per-PR with a button or via `gh pr merge --auto`.
 
@@ -311,6 +337,8 @@ Auto-merge can conflict with required commit signing (see section 9). If you req
 ---
 
 ## 11. GitHub Projects
+
+> **Setup:** Substantially CLI-driven. Create: `gh project create --owner @me --title "LifeTrak"`. Manage fields: `gh project field-create/list/delete`. Add/edit items: `gh project item-add/edit/list`. The web UI is useful for configuring custom views and drag-and-drop organization, but the core setup doesn't require it.
 
 ### What it is
 A flexible kanban/spreadsheet project management tool built into GitHub. Issues and PRs can be tracked as cards, with custom fields, views, and workflows. It replaced the older "GitHub Projects Classic."
@@ -330,6 +358,8 @@ GitHub Projects is free for all accounts.
 
 ## 12. GitHub Copilot
 
+> **Setup:** Web UI required — github.com/settings/copilot. No `gh` command for account-level activation. Once active, the `gh copilot` CLI tool works from the terminal, but enabling the subscription is web-only.
+
 ### What it is
 An AI pair programmer integrated into your editor. Provides inline code completions, chat, and increasingly agentic capabilities (it can open PRs autonomously when assigned an issue).
 
@@ -346,6 +376,8 @@ The free tier is worth enabling and evaluating. If you find yourself frequently 
 ---
 
 ## 13. GitHub CLI (`gh`)
+
+> **Setup:** Already installed at `/opt/homebrew/bin/gh`. Authenticate once with `gh auth login` (interactive). Nothing else needed.
 
 ### What it is
 The official GitHub command-line tool (`gh`). Already in use in this project. Lets you manage PRs, issues, releases, workflows, and more without leaving the terminal.
@@ -385,6 +417,8 @@ gh pr view 12 --web
 
 ## 14. Community Health Files
 
+> **Setup:** Commit the files to the repo root or `.github/` — no web UI needed.
+
 ### What they are
 Standard markdown files that GitHub recognizes and surfaces in the UI. They communicate expectations to anyone visiting the repository.
 
@@ -401,24 +435,38 @@ For a personal project, `SECURITY.md` is the one worth adding even now — it's 
 ## 15. Things with Important Caveats
 
 ### Merge Queue
+> **Setup:** Configured via rulesets (`gh ruleset create`) or branch protection (`gh api`). CLI-scriptable.
+
 A system that batches PRs together and runs CI on the combined result before merging, preventing "works on branch, breaks main" problems. Useful for high-velocity teams. For a solo project, this adds overhead with no real benefit — auto-merge (section 10) is sufficient.
 
 ### GitHub Pages
+> **Setup:** `gh api` scriptable (`gh api -X PUT /repos/{owner}/{repo}/pages -f build_type=workflow`), or web UI — Settings → Pages.
+
 Free hosting for static websites from a repo. Could host documentation or a landing page for the app. Not relevant until there's something to publish publicly.
 
 ### GitHub Discussions
+> **Setup:** CLI — `gh repo edit --enable-discussions`. No web UI needed.
+
 A forum built into the repo. Valuable for open-source projects to separate support questions from bug reports. No value for a personal project.
 
 ### GitHub Packages
+> **Setup:** No special configuration needed. Publishing happens via an Actions workflow (`GITHUB_TOKEN` is automatically available).
+
 A registry for publishing packages (Swift packages, Docker images, etc.). Relevant if this app's shared code ever becomes a reusable library. Not applicable now.
 
 ### GitHub Environments and Deployment Protection
+> **Setup:** Web UI required to create environments — Settings → Environments. Once created, secrets can be managed via CLI: `gh secret set MY_SECRET --env production`.
+
 Lets you define deployment targets (staging, production) with protection rules and required approvers. Valuable in team settings for controlling who can deploy what. Not applicable for a personal iOS app that distributes via TestFlight/App Store.
 
 ### GitHub Wikis
+> **Setup:** Web UI required — Settings → Features → Wikis checkbox.
+
 A built-in wiki for documentation. The existing PLAN.md and CLAUDE.md approach in markdown files checked into the repo is generally better — it's versioned, diff-able, and appears in code search. Avoid wikis unless you have a specific need for a separate documentation space.
 
 ### GitHub Advanced Security (Paid)
+> **Setup:** Web UI or `gh api` to enable. Paid plan must be active first.
+
 Unlocks code scanning, secret scanning, and dependency review for **private repos**. Priced at $19/month per active committer for Secret Protection, and similarly for Code Security. For a personal private repo, this is likely not cost-justified. If you ever make the repo public, all of these features become free automatically.
 
 ### GitHub Enterprise / Team Plan
