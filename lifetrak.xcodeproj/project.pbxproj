@@ -37,6 +37,13 @@
 			);
 			target = 371ECE6A2F53B1370058A791 /* lifetrak */;
 		};
+		376A7C0F2F6DFF8C003422D6 /* Exceptions for "lifetrak" folder in "lifetrakUITests" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				AccessibilityIdentifiers.swift,
+			);
+			target = 371ECE852F53B1390058A791 /* lifetrakUITests */;
+		};
 /* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -44,6 +51,7 @@
 			isa = PBXFileSystemSynchronizedRootGroup;
 			exceptions = (
 				371ECE8E2F53B1390058A791 /* Exceptions for "lifetrak" folder in "lifetrak" target */,
+				376A7C0F2F6DFF8C003422D6 /* Exceptions for "lifetrak" folder in "lifetrakUITests" target */,
 			);
 			path = lifetrak;
 			sourceTree = "<group>";
