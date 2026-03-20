@@ -20,9 +20,6 @@ jobs:
           sudo xcode-select -s "$XCODE_PATH/Contents/Developer"
           xcodebuild -version
 
-      - name: Boot simulator
-        run: xcrun simctl boot "iPhone 16 Pro" || true
-
       - name: Test
         run: |
           xcodebuild -scheme lifetrak \
