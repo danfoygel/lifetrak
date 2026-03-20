@@ -542,6 +542,296 @@ Given the current stack (SwiftUI + SwiftData, Swift Testing, XCUITest), here is 
 
 ---
 
+## Implementation Plan
+
+This section translates the six recommendations above into concrete, ordered work. Two recommendations are already complete; the rest are broken down file-by-file.
+
+### Status of each recommendation
+
+| # | Recommendation | Status |
+|---|---------------|--------|
+| 1 | swift-snapshot-testing | Not started |
+| 2 | In-memory SwiftData containers in all integration tests | **Done** — `TestHelpers.makeContainer()` is used in every test |
+| 3 | `--uitesting` + `--seed-*` launch argument handling | Not started |
+| 4 | GitHub Actions CI | Partial — workflow exists but lacks `CODE_SIGNING_ALLOWED=NO`, artifact upload, xcresulttool reporting |
+| 5 | Exclude UI tests from CI by default | **Done** — workflow runs `-only-testing:lifetrakTests` only |
+| 6 | `xcresulttool` as authoritative source of truth | Not wired into CI |
+
+---
+
+### Step 1 — `--uitesting` + `--seed-*` launch argument handling (Rec 3)
+
+#### `lifetrak/AccessibilityIdentifiers.swift` — create
+
+A shared `AXID` enum compiled into both the app target and the test target. Defines a string constant for every meaningful interactive or data-display element in `TodayView`:
+
+```swift
+// Shared between app and test targets — add to both in target membership
+enum AXID {
+    enum Today {
+        static let progressRing  = "progressRing"
+        static let progressLabel = "progressLabel"
+        static let logButton     = "logWaterButton"
+        static let streakLabel   = "streakLabel"
+        static let weeklyChart   = "weeklyChart"
+        static let entryList     = "entryList"
+    }
+}
+```
+
+#### `lifetrak/UITestSeeder.swift` — create (`#if DEBUG` only)
+
+A single `seed(container:)` function that reads `ProcessInfo.processInfo.arguments` and dispatches to scenario helpers:
+
+```swift
+#if DEBUG
+enum UITestSeeder {
+    static func seed(container: ModelContainer) {
+        let args = ProcessInfo.processInfo.arguments
+        if args.contains("--seed-partial-day")    { seedPartialDay(container) }
+        if args.contains("--seed-goal-met")        { seedGoalMet(container) }
+        if args.contains("--seed-water-history")   { seedWaterHistory(container) }
+    }
+
+    // 3×8 oz today → 24 oz of 64 oz goal (37.5 %)
+    private static func seedPartialDay(_ container: ModelContainer) { ... }
+
+    // 8×8 oz today → exactly 64 oz, goal met
+    private static func seedGoalMet(_ container: ModelContainer) { ... }
+
+    // 64 oz/day for the past 30 days → 30-day streak
+    private static func seedWaterHistory(_ container: ModelContainer) { ... }
+}
+#endif
+```
+
+Each helper must: insert a "Drink Water" `Activity` + default `Routine` + `Goal` (64 oz), then insert the appropriate `Event` records, then call `try? context.save()`.
+
+#### `lifetrak/lifetrakApp.swift` — modify
+
+Wrap the `ModelContainer` construction in a `#if DEBUG` check. When `--uitesting` is present, build the container with `isStoredInMemoryOnly: true` and call `UITestSeeder.seed(container:)` immediately after:
+
+```swift
+init() {
+    let schema = Schema([Activity.self, Event.self, Routine.self,
+                         Goal.self, RoutineSchedule.self, WaterEntry.self])
+    #if DEBUG
+    if ProcessInfo.processInfo.arguments.contains("--uitesting") {
+        let config = ModelConfiguration(schema: schema, isStoredInMemoryOnly: true)
+        sharedModelContainer = try! ModelContainer(for: schema, configurations: config)
+        UITestSeeder.seed(container: sharedModelContainer)
+        return
+    }
+    #endif
+    // Production path — unchanged
+    let config = ModelConfiguration(schema: schema, isStoredInMemoryOnly: false)
+    sharedModelContainer = try! ModelContainer(for: schema, configurations: config)
+}
+```
+
+#### `lifetrak/TodayView.swift` — modify
+
+Two changes:
+
+1. **Add accessibility identifiers** to every element named in `AXID.Today`:
+   - Progress ring `ZStack` → `.accessibilityIdentifier(AXID.Today.progressRing)`
+   - Progress/goal `Text` → `.accessibilityIdentifier(AXID.Today.progressLabel)`
+   - Log `Button` → `.accessibilityIdentifier(AXID.Today.logButton)`
+   - Streak `HStack` → `.accessibilityIdentifier(AXID.Today.streakLabel)`
+   - Weekly chart `VStack` → `.accessibilityIdentifier(AXID.Today.weeklyChart)`
+   - Entries `VStack` → `.accessibilityIdentifier(AXID.Today.entryList)`
+
+2. **Add an optional injected `viewModel` parameter** to `TodayView.init` so snapshot tests can pass a pre-built VM directly (see Step 2):
+   ```swift
+   // Keep the existing @State var for production; allow override for tests
+   init(viewModel: TodayViewModel? = nil) {
+       _viewModel = State(initialValue: viewModel)
+   }
+   ```
+
+#### `lifetrakUITests/lifetrakUITests.swift` — rewrite
+
+Replace the empty stub with a base class + three concrete tests:
+
+```swift
+class LifetrakUITestCase: XCTestCase {
+    var app: XCUIApplication!
+    override func setUp() {
+        super.setUp()
+        continueAfterFailure = false
+        app = XCUIApplication()
+    }
+    func launch(args: [String] = []) {
+        app.launchArguments = ["--uitesting"] + args
+        app.launch()
+    }
+}
+
+final class TodayViewUITests: LifetrakUITestCase {
+
+    func testLogButtonExistsOnLaunch() {
+        launch()
+        XCTAssertTrue(app.buttons[AXID.Today.logButton].waitForExistence(timeout: 5))
+    }
+
+    func testProgressLabelShowsPartialProgress() {
+        launch(args: ["--seed-partial-day"])
+        // 24 oz of 64 oz goal
+        XCTAssertTrue(app.staticTexts["24"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["of 64 oz"].exists)
+    }
+
+    func testStreakLabelShowsAfter30Days() {
+        launch(args: ["--seed-water-history"])
+        let streak = app.otherElements[AXID.Today.streakLabel]
+        XCTAssertTrue(streak.waitForExistence(timeout: 5))
+        XCTAssertTrue(streak.staticTexts["30-day streak"].exists)
+    }
+}
+```
+
+---
+
+### Step 2 — swift-snapshot-testing (Rec 1)
+
+#### Manual prerequisite (cannot be scripted)
+
+In Xcode: File → Add Package Dependencies → enter `https://github.com/pointfreeco/swift-snapshot-testing`, set version to `≥ 1.17.0`, add `SnapshotTesting` to the **lifetrakTests** target only.
+
+This step must be done in Xcode before the test file below will compile.
+
+#### `lifetrakTests/SnapshotTests.swift` — create
+
+A `@Suite(.serialized)` struct with four tests. Each test builds a `TodayViewModel` from an in-memory container pre-seeded to a specific state, constructs a `TodayView(viewModel: vm)` using the injected-VM init added in Step 1, and calls `assertSnapshot`:
+
+```swift
+import SnapshotTesting
+import SwiftUI
+import Testing
+@testable import lifetrak
+
+@MainActor
+@Suite("TodayView Snapshots", .serialized)
+struct SnapshotTests {
+
+    @Test func rendersEmptyState() throws {
+        let vm = try makeVM(oz: 0)
+        assertSnapshot(
+            of: TodayView(viewModel: vm),
+            as: .image(layout: .device(config: .iPhone16))
+        )
+    }
+
+    @Test func rendersPartialProgress() throws {
+        let vm = try makeVM(oz: 24)   // 24/64 = 37.5%
+        assertSnapshot(
+            of: TodayView(viewModel: vm),
+            as: .image(layout: .device(config: .iPhone16))
+        )
+    }
+
+    @Test func rendersGoalMet() throws {
+        let vm = try makeVM(oz: 64)   // green ring + "Goal reached!"
+        assertSnapshot(
+            of: TodayView(viewModel: vm),
+            as: .image(layout: .device(config: .iPhone16))
+        )
+    }
+
+    @Test func rendersWithStreak() throws {
+        let vm = try makeVM(oz: 64, priorDaysMeetingGoal: 2)
+        assertSnapshot(
+            of: TodayView(viewModel: vm),
+            as: .image(layout: .device(config: .iPhone16))
+        )
+    }
+}
+```
+
+A private `makeVM(oz:priorDaysMeetingGoal:)` helper creates the in-memory container, inserts the water Activity + Routine + Goal, inserts the appropriate Event records, and returns a `TodayViewModel`.
+
+**First run records reference images** into `lifetrakTests/__Snapshots__/SnapshotTests/`. Commit this directory. All subsequent runs diff against those images.
+
+**Important**: reference snapshots must be recorded on the same simulator model used in CI (iPhone 16 Pro, as configured in the workflow). If you record locally on a different device, snapshot tests will always fail in CI.
+
+---
+
+### Step 3 — GitHub Actions improvements (Recs 4 & 6)
+
+#### `.github/workflows/test.yml` — modify
+
+Four changes to the existing file:
+
+**1. Add `CODE_SIGNING_ALLOWED=NO`** to both the Build and Test steps. Without this, the build fails on GitHub-hosted runners which have no signing certificates:
+```yaml
+- name: Build
+  run: |
+    xcodebuild -scheme lifetrak \
+      -destination 'platform=iOS Simulator,name=iPhone 16 Pro' \
+      CODE_SIGNING_ALLOWED=NO \
+      build
+
+- name: Test
+  run: |
+    xcodebuild -scheme lifetrak \
+      -destination 'platform=iOS Simulator,name=iPhone 16 Pro' \
+      -only-testing:lifetrakTests \
+      CODE_SIGNING_ALLOWED=NO \
+      test
+```
+
+**2. Add a xcresulttool summary step** that runs unconditionally after tests (pass or fail), printing a compact JSON summary to the workflow log:
+```yaml
+- name: Test summary
+  if: always()
+  run: |
+    RESULT=$(find ~/Library/Developer/Xcode/DerivedData \
+      -name "*.xcresult" | sort -t/ -k1,1 | tail -1)
+    if [ -n "$RESULT" ]; then
+      xcrun xcresulttool get test-results summary \
+        --path "$RESULT" --compact
+    fi
+```
+
+**3. Add artifact upload on failure** so the full `.xcresult` bundle is downloadable from the Actions UI:
+```yaml
+- name: Upload test results
+  if: failure()
+  uses: actions/upload-artifact@v4
+  with:
+    name: test-results-${{ github.run_id }}
+    path: ~/Library/Developer/Xcode/DerivedData/**/Logs/Test/*.xcresult
+    retention-days: 7
+```
+
+**4. Add a comment block** at the top of the file explaining why UI tests are excluded and how to run them locally:
+```yaml
+# UI tests (lifetrakUITests) are intentionally excluded from this workflow.
+# They are slow, require a booted simulator, and are fragile in CI.
+# Run them locally before merging:
+#   xcodebuild -scheme lifetrak \
+#     -destination 'platform=iOS Simulator,name=iPhone 16 Pro' \
+#     -only-testing:lifetrakUITests test
+```
+
+---
+
+### File change summary
+
+| File | Action | Rec |
+|------|--------|-----|
+| `lifetrak/AccessibilityIdentifiers.swift` | Create | 3 |
+| `lifetrak/UITestSeeder.swift` | Create | 3 |
+| `lifetrak/lifetrakApp.swift` | Modify — add `--uitesting` branch | 3 |
+| `lifetrak/TodayView.swift` | Modify — add AXID modifiers + injected-VM init | 3, 1 |
+| `lifetrakUITests/lifetrakUITests.swift` | Rewrite | 3 |
+| `lifetrakTests/SnapshotTests.swift` | Create (after manual SPM step) | 1 |
+| `.github/workflows/test.yml` | Modify — signing flag, xcresulttool, artifact upload | 4, 6 |
+
+The only step requiring Xcode GUI is adding the `swift-snapshot-testing` SPM package. Every other change is a pure Swift or YAML edit.
+
+---
+
 ## References
 
 - [pointfreeco/swift-snapshot-testing](https://github.com/pointfreeco/swift-snapshot-testing)
