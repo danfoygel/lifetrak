@@ -79,31 +79,7 @@ SwiftLint (open source, no external service needed) can run as an Actions step t
 >
 > **Setup — rulesets:** Fully supported via `gh ruleset` — `gh ruleset create`, `gh ruleset list`, `gh ruleset view`, `gh ruleset check`, `gh ruleset delete`. No web UI required. Rulesets are the better choice if you want automation.
 >
-> **Pending — run this on your Mac** (requires `gh` auth):
-> ```bash
-> gh api repos/danfoygel/lifetrak/rulesets \
->   --method POST \
->   --field name="protect-main" \
->   --field target="branch" \
->   --field enforcement="active" \
->   --raw-field conditions='{"ref_name":{"include":["refs/heads/main"],"exclude":[]}}' \
->   --raw-field rules='[
->     {"type":"deletion"},
->     {"type":"non_fast_forward"},
->     {"type":"pull_request","parameters":{
->       "required_approving_review_count":0,
->       "dismiss_stale_reviews_on_push":false,
->       "require_code_owner_review":false,
->       "require_last_push_approval":false,
->       "required_review_thread_resolution":true
->     }},
->     {"type":"required_status_checks","parameters":{
->       "strict_required_status_checks_policy":false,
->       "required_status_checks":[{"context":"test"}]
->     }}
->   ]'
-> ```
-> This creates a ruleset that: requires a PR before merging, requires the `test` CI job to pass, blocks force pushes, and prevents branch deletion. `required_approving_review_count:0` means no reviewer approval is required — appropriate for a solo project (the CI gate is the meaningful check). Raise it to 1 if you add collaborators.
+> **Done:** Ruleset `protect-main` (ID 14170816) created via `gh api`. Rules enforced on `main`: requires a PR before merging, requires the `test` CI job to pass, requires review thread resolution, blocks force pushes, prevents branch deletion. `required_approving_review_count` is 0 (appropriate for solo — the CI gate is the meaningful check).
 
 ### What it is
 Rules that govern what can be pushed to specific branches. GitHub has two overlapping systems:
