@@ -27,6 +27,8 @@ A research report on native GitHub capabilities worth using in this repo — wha
 ## 1. CI/CD with GitHub Actions
 
 > **Setup:** Workflow YAML files are committed to `.github/workflows/` — no web UI needed, and version-controlled like any other code. Toggle individual workflows on/off via `gh workflow enable/disable`. **Self-hosted runner** is the exception: it requires physical access to the Mac, running `./config.sh` interactively on that machine (the registration token can be generated via `gh api`, but the runner setup itself is manual, ~1 hour one-time).
+>
+> **Done:** `.github/workflows/test.yml` — builds and runs unit tests on every push and PR to `main`, using `macos-15` and `iPhone 16 Pro` simulator. The CI job is named `test` (referenced by the ruleset in section 2).
 
 ### What it is
 A workflow automation system built into GitHub. You define workflows as YAML files in `.github/workflows/`. Workflows trigger on events (push, PR opened, schedule, etc.) and run sequences of jobs on GitHub-hosted or self-hosted machines.
