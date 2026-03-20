@@ -4,16 +4,10 @@ import Foundation
 /// No HealthKit dependency — fully testable.
 enum SleepAggregator {
 
-    /// Maximum gap (in seconds) between samples to consider them part of the same session.
-    private static let sessionGapThreshold: TimeInterval = 30 * 60 // 30 minutes
-
-    /// Minimum session duration (in seconds) to qualify as primary sleep (not a nap).
-    private static let minimumPrimarySleepDuration: TimeInterval = 3 * 3600 // 3 hours
-
     /// Aggregate raw sleep samples into sleep nights.
     /// Filters to primary sleep only (sessions > 3 hours).
     /// Assigns each night to the wake-up calendar date.
-    static func aggregate(_ samples: [RawSleepSample]) -> [SleepNight] {
+    nonisolated static func aggregate(_ samples: [RawSleepSample]) -> [SleepNight] {
         guard !samples.isEmpty else { return [] }
 
         let sorted = samples.sorted { $0.startDate < $1.startDate }
@@ -27,14 +21,14 @@ enum SleepAggregator {
 
     // MARK: - Session Grouping
 
-    private static func groupIntoSessions(_ samples: [RawSleepSample]) -> [[RawSleepSample]] {
+    nonisolated private static func groupIntoSessions(_ samples: [RawSleepSample]) -> [[RawSleepSample]] {
         var sessions: [[RawSleepSample]] = []
         var currentSession: [RawSleepSample] = []
 
         for sample in samples {
             if let last = currentSession.last {
                 let gap = sample.startDate.timeIntervalSince(last.endDate)
-                if gap > sessionGapThreshold {
+                if gap > 30 * 60 { // 30-minute session gap threshold
                     sessions.append(currentSession)
                     currentSession = [sample]
                 } else {
@@ -54,15 +48,15 @@ enum SleepAggregator {
 
     // MARK: - Filtering
 
-    private static func isPrimarySleep(_ session: [RawSleepSample]) -> Bool {
+    nonisolated private static func isPrimarySleep(_ session: [RawSleepSample]) -> Bool {
         guard let first = session.first, let last = session.last else { return false }
         let totalSpan = last.endDate.timeIntervalSince(first.startDate)
-        return totalSpan >= minimumPrimarySleepDuration
+        return totalSpan >= 3 * 3600 // 3-hour minimum for primary sleep
     }
 
     // MARK: - Building SleepNight
 
-    private static func buildSleepNight(from samples: [RawSleepSample]) -> SleepNight? {
+    nonisolated private static func buildSleepNight(from samples: [RawSleepSample]) -> SleepNight? {
         guard let earliestStart = samples.min(by: { $0.startDate < $1.startDate })?.startDate,
               let latestEnd = samples.max(by: { $0.endDate < $1.endDate })?.endDate else {
             return nil

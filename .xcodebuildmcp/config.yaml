@@ -1,0 +1,19 @@
+schemaVersion: 1
+enabledWorkflows:
+  - coverage
+  - debugging
+  - device
+  - doctor
+  - logging
+  - simulator
+  - simulator-management
+  - ui-automation
+  - utilities
+debug: true
+sentryDisabled: false
+sessionDefaults:
+  projectPath: lifetrak.xcodeproj
+  scheme: lifetrak
+  simulatorName: iPhone 14
+  simulatorId: F22E4008-70A6-45C9-ADF4-2EE57D1F6A85
+  deviceId: F1B0BFBF-AAA3-5C44-BB62-EA7AADFBB50F
