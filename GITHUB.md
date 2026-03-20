@@ -356,7 +356,7 @@ The free tier is worth enabling and evaluating. If you find yourself frequently 
 
 ## 13. GitHub CLI (`gh`)
 
-> **Setup:** Already installed at `/opt/homebrew/bin/gh`. Authenticate once with `gh auth login` (interactive). Nothing else needed.
+> **Setup:** Already installed on your Mac at `/opt/homebrew/bin/gh`. Authenticate once by running `gh auth login` in Terminal (opens a browser flow). Nothing else needed.
 
 ### What it is
 The official GitHub command-line tool (`gh`). Already in use in this project. Lets you manage PRs, issues, releases, workflows, and more without leaving the terminal.
