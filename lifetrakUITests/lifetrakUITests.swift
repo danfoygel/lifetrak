@@ -2,40 +2,55 @@
 //  lifetrakUITests.swift
 //  lifetrakUITests
 //
-//  Created by Dan Foygel on 2/28/26.
-//
 
 import XCTest
 
-final class lifetrakUITests: XCTestCase {
+// AXID constants mirrored from AccessibilityIdentifiers.swift.
+// Keep in sync if identifiers change. See lifetrak/AccessibilityIdentifiers.swift.
+private enum AXID {
+    enum Today {
+        static let progressRing  = "progressRing"
+        static let progressLabel = "progressLabel"
+        static let logButton     = "logWaterButton"
+        static let streakLabel   = "streakLabel"
+        static let weeklyChart   = "weeklyChart"
+        static let entryList     = "entryList"
+    }
+}
 
-    override func setUpWithError() throws {
-        // Put setup code here. This method is called before the invocation of each test method in the class.
+class LifetrakUITestCase: XCTestCase {
+    var app: XCUIApplication!
 
-        // In UI tests it is usually best to stop immediately when a failure occurs.
+    override func setUp() {
+        super.setUp()
         continueAfterFailure = false
-
-        // In UI tests it’s important to set the initial state - such as interface orientation - required for your tests before they run. The setUp method is a good place to do this.
+        app = XCUIApplication()
     }
 
-    override func tearDownWithError() throws {
-        // Put teardown code here. This method is called after the invocation of each test method in the class.
-    }
-
-    @MainActor
-    func testExample() throws {
-        // UI tests must launch the application that they test.
-        let app = XCUIApplication()
+    func launch(args: [String] = []) {
+        app.launchArguments = ["--uitesting"] + args
         app.launch()
+    }
+}
 
-        // Use XCTAssert and related functions to verify your tests produce the correct results.
+final class TodayViewUITests: LifetrakUITestCase {
+
+    func testLogButtonExistsOnLaunch() {
+        launch()
+        XCTAssertTrue(app.buttons[AXID.Today.logButton].waitForExistence(timeout: 5))
     }
 
-    @MainActor
-    func testLaunchPerformance() throws {
-        // This measures how long it takes to launch your application.
-        measure(metrics: [XCTApplicationLaunchMetric()]) {
-            XCUIApplication().launch()
-        }
+    func testProgressLabelShowsPartialProgress() {
+        launch(args: ["--seed-partial-day"])
+        // 3 × 8 oz = 24 oz of 64 oz goal
+        XCTAssertTrue(app.staticTexts["24"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["of 64 oz"].exists)
+    }
+
+    func testStreakLabelShowsAfter30Days() {
+        launch(args: ["--seed-water-history"])
+        let streak = app.otherElements[AXID.Today.streakLabel]
+        XCTAssertTrue(streak.waitForExistence(timeout: 10))
+        XCTAssertTrue(streak.staticTexts["30-day streak"].exists)
     }
 }
