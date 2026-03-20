@@ -427,6 +427,8 @@ gh pr view 12 --web
 ## 14. Community Health Files
 
 > **Setup:** Commit the files to the repo root or `.github/` — no web UI needed.
+>
+> **Done:** `SECURITY.md` committed.
 
 ### What they are
 Standard markdown files that GitHub recognizes and surfaces in the UI. They communicate expectations to anyone visiting the repository.
