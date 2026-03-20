@@ -134,6 +134,8 @@ Rulesets are strictly more capable and GitHub is investing in them as the future
 ## 3. Pull Request & Issue Templates
 
 > **Setup:** Commit the files to `.github/` — GitHub detects them automatically. No web UI, no CLI commands needed.
+>
+> **Done:** `.github/pull_request_template.md` committed.
 
 ### What it is
 Markdown templates stored in `.github/` that pre-populate the body of new PRs or issues. GitHub automatically uses them when someone opens a PR or issue.
