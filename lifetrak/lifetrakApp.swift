@@ -10,7 +10,9 @@ import SwiftData
 
 @main
 struct lifetrakApp: App {
-    var sharedModelContainer: ModelContainer = {
+    var sharedModelContainer: ModelContainer
+
+    init() {
         let schema = Schema([
             Activity.self,
             Event.self,
@@ -19,14 +21,23 @@ struct lifetrakApp: App {
             RoutineSchedule.self,
             WaterEntry.self,
         ])
-        let modelConfiguration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: false)
 
+        #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("--uitesting") {
+            let config = ModelConfiguration(schema: schema, isStoredInMemoryOnly: true)
+            sharedModelContainer = try! ModelContainer(for: schema, configurations: config)
+            UITestSeeder.seed(container: sharedModelContainer)
+            return
+        }
+        #endif
+
+        let config = ModelConfiguration(schema: schema, isStoredInMemoryOnly: false)
         do {
-            return try ModelContainer(for: schema, configurations: modelConfiguration)
+            sharedModelContainer = try ModelContainer(for: schema, configurations: config)
         } catch {
             fatalError("Could not create ModelContainer: \(error)")
         }
-    }()
+    }
 
     var body: some Scene {
         WindowGroup {

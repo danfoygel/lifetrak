@@ -7,6 +7,10 @@ struct TodayView: View {
     @State private var viewModel: TodayViewModel?
     @State private var showCelebration = false
 
+    init(viewModel: TodayViewModel? = nil) {
+        _viewModel = State(initialValue: viewModel)
+    }
+
     var body: some View {
         NavigationStack {
             Group {
@@ -67,9 +71,11 @@ struct TodayView: View {
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                 }
+                .accessibilityIdentifier(AXID.Today.progressLabel)
             }
             .frame(width: 200, height: 200)
             .padding(.top, 8)
+            .accessibilityIdentifier(AXID.Today.progressRing)
             .overlay {
                 if showCelebration {
                     CelebrationOverlay()
@@ -105,6 +111,7 @@ struct TodayView: View {
         .buttonStyle(.borderedProminent)
         .tint(.blue)
         .sensoryFeedback(.impact(weight: .medium), trigger: vm.todayEntries.count)
+        .accessibilityIdentifier(AXID.Today.logButton)
     }
 
     // MARK: - Streak Section
@@ -122,6 +129,7 @@ struct TodayView: View {
             .padding(.vertical, 8)
             .padding(.horizontal, 16)
             .background(Color.orange.opacity(0.1), in: RoundedRectangle(cornerRadius: 12))
+            .accessibilityIdentifier(AXID.Today.streakLabel)
         }
     }
 
@@ -169,6 +177,7 @@ struct TodayView: View {
         }
         .padding()
         .background(Color(.systemGray6), in: RoundedRectangle(cornerRadius: 12))
+        .accessibilityIdentifier(AXID.Today.weeklyChart)
     }
 
     // MARK: - Entries List
@@ -197,6 +206,7 @@ struct TodayView: View {
                     .background(Color(.systemGray6), in: RoundedRectangle(cornerRadius: 8))
                 }
             }
+            .accessibilityIdentifier(AXID.Today.entryList)
         }
     }
 
