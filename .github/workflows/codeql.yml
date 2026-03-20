@@ -27,6 +27,10 @@ jobs:
         with:
           languages: swift
 
-      - uses: github/codeql-action/autobuild@v3
+      - name: Build
+        run: |
+          xcodebuild -scheme lifetrak \
+            -destination 'platform=iOS Simulator,name=iPhone 16 Pro' \
+            build
 
       - uses: github/codeql-action/analyze@v3
