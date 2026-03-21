@@ -47,6 +47,13 @@ jobs:
           path: ~/Library/Developer/Xcode/DerivedData/SDKStatCaches.noindex
           key: ${{ runner.os }}-sdkstatcache-${{ steps.xcode.outputs.version }}
 
+      - name: Create simulator
+        run: |
+          # Reference snapshots are recorded against iOS 26.3. CI ships with iOS 26.2
+          # devices pre-created, so we create an iOS 26.3 device explicitly.
+          xcrun simctl create "iPhone 16 Pro" "iPhone 16 Pro" \
+            com.apple.CoreSimulator.SimRuntime.iOS-26-3
+
       - name: Test
         run: |
           xcodebuild -scheme lifetrak \
