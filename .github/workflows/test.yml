@@ -49,14 +49,10 @@ jobs:
 
       - name: Test
         run: |
-          # SnapshotTests are skipped in CI: reference images were recorded on a different
-          # simulator model and pixel-exact comparisons will fail across environments.
-          # Run snapshot tests locally before merging visual changes.
           xcodebuild -scheme lifetrak \
-            -destination 'platform=iOS Simulator,name=iPhone 16 Pro' \
+            -destination 'platform=iOS Simulator,name=iPhone 16 Pro,OS=26.3' \
             -only-testing:lifetrakTests \
             -skip-testing:lifetrakUITests \
-            -skip-testing:lifetrakTests/SnapshotTests \
             SWIFT_ENABLE_CODE_COVERAGE=NO \
             COMPILER_INDEX_STORE_ENABLE=NO \
             test
