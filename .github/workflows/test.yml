@@ -28,14 +28,8 @@ jobs:
     needs: changes
     if: needs.changes.outputs.src == 'true'
     runs-on: macos-15
-    permissions:
-      contents: write
     steps:
       - uses: actions/checkout@v4
-        with:
-          # Check out the branch by name (not a detached SHA) so we can push
-          # back any newly-recorded reference snapshots.
-          ref: ${{ github.head_ref || github.ref_name }}
 
       - name: Select Xcode
         id: xcode
@@ -53,36 +47,24 @@ jobs:
           path: ~/Library/Developer/Xcode/DerivedData/SDKStatCaches.noindex
           key: ${{ runner.os }}-sdkstatcache-${{ steps.xcode.outputs.version }}
 
+      - name: Download iOS 26.3 simulator runtime
+        run: |
+          # CI ships with iOS 26.2 runtimes; reference snapshots are recorded against
+          # iOS 26.3 (the runtime bundled with local Xcode). Download it so the
+          # destination resolves and rendering matches the committed references.
+          xcodebuild -downloadPlatform iOS
+
+      - name: Create iPhone 16 Pro simulator (iOS 26.3)
+        run: |
+          xcrun simctl create "iPhone 16 Pro" "iPhone 16 Pro" \
+            com.apple.CoreSimulator.SimRuntime.iOS-26-3
+
       - name: Test
         run: |
-          _run_tests() {
-            xcodebuild -scheme lifetrak \
-              -destination 'platform=iOS Simulator,name=iPhone 16 Pro' \
-              -only-testing:lifetrakTests \
-              -skip-testing:lifetrakUITests \
-              SWIFT_ENABLE_CODE_COVERAGE=NO \
-              COMPILER_INDEX_STORE_ENABLE=NO \
-              test
-          }
-
-          _run_tests || {
-            # Tests failed — check if swift-snapshot-testing recorded new reference
-            # images (first run after a reference is deleted or added).
-            NEW=$(git ls-files --others --exclude-standard lifetrakTests/__Snapshots__/)
-            if [ -z "$NEW" ]; then
-              echo "Tests failed for reasons unrelated to snapshot recording."
-              exit 1
-            fi
-
-            echo "New reference snapshots recorded:"
-            echo "$NEW"
-
-            git config user.name "github-actions[bot]"
-            git config user.email "github-actions[bot]@users.noreply.github.com"
-            git add lifetrakTests/__Snapshots__/
-            git commit -m "Record reference snapshots on CI [skip ci]"
-            git push
-
-            echo "Snapshots committed — re-running tests."
-            _run_tests
-          }
+          xcodebuild -scheme lifetrak \
+            -destination 'platform=iOS Simulator,name=iPhone 16 Pro,OS=26.3' \
+            -only-testing:lifetrakTests \
+            -skip-testing:lifetrakUITests \
+            SWIFT_ENABLE_CODE_COVERAGE=NO \
+            COMPILER_INDEX_STORE_ENABLE=NO \
+            test
