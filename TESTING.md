@@ -550,7 +550,7 @@ This section translates the six recommendations above into concrete, ordered wor
 
 | # | Recommendation | Status |
 |---|---------------|--------|
-| 1 | swift-snapshot-testing | Not started |
+| 1 | swift-snapshot-testing | **Done** — `SnapshotTesting` 1.19.1 added via SPM; `SnapshotTests.swift` created with 4 tests; reference images recorded |
 | 2 | In-memory SwiftData containers in all integration tests | **Done** — `TestHelpers.makeContainer()` is used in every test |
 | 3 | `--uitesting` + `--seed-*` launch argument handling | **Done** — merged in PR #12 |
 | 4 | GitHub Actions CI | Partial — workflow exists but lacks `CODE_SIGNING_ALLOWED=NO`, artifact upload, xcresulttool reporting |
@@ -692,13 +692,16 @@ final class TodayViewUITests: LifetrakUITestCase {
 
 ---
 
-### Step 2 — swift-snapshot-testing (Rec 1)
+### Step 2 — swift-snapshot-testing (Rec 1) ✅ DONE
 
-#### Manual prerequisite (cannot be scripted)
+**Implementation notes:**
+- `SnapshotTesting` 1.19.1 added via SPM by editing `project.pbxproj` directly (no manual Xcode step needed)
+- `Package.resolved` generated via `xcodebuild -resolvePackageDependencies`
+- Used `.iPhone13Pro` device config (1.19.1 does not include `.iPhone16`; update when the library adds it)
+- Reference snapshots recorded with `-parallel-testing-enabled NO` to prevent race conditions during initial recording; subsequent runs work normally
+- 4 reference PNGs committed in `lifetrakTests/__Snapshots__/SnapshotTests/`
 
-In Xcode: File → Add Package Dependencies → enter `https://github.com/pointfreeco/swift-snapshot-testing`, set version to `≥ 1.17.0`, add `SnapshotTesting` to the **lifetrakTests** target only.
-
-This step must be done in Xcode before the test file below will compile.
+#### `lifetrakTests/SnapshotTests.swift` — created
 
 #### `lifetrakTests/SnapshotTests.swift` — create
 
