@@ -1,14 +1,13 @@
 import SnapshotTesting
 import SwiftUI
 import SwiftData
-import Testing
+import XCTest
 @testable import lifetrak
 
 @MainActor
-@Suite("TodayView Snapshots", .serialized)
-struct SnapshotTests {
+final class SnapshotTests: XCTestCase {
 
-    @Test func rendersEmptyState() throws {
+    func testRendersEmptyState() throws {
         let (vm, container) = try makeVM(oz: 0)
         assertSnapshot(
             of: TodayView(viewModel: vm).modelContainer(container),
@@ -16,7 +15,7 @@ struct SnapshotTests {
         )
     }
 
-    @Test func rendersPartialProgress() throws {
+    func testRendersPartialProgress() throws {
         let (vm, container) = try makeVM(oz: 24)   // 24/64 = 37.5%
         assertSnapshot(
             of: TodayView(viewModel: vm).modelContainer(container),
@@ -24,7 +23,7 @@ struct SnapshotTests {
         )
     }
 
-    @Test func rendersGoalMet() throws {
+    func testRendersGoalMet() throws {
         let (vm, container) = try makeVM(oz: 64)   // green ring + "Goal reached!"
         assertSnapshot(
             of: TodayView(viewModel: vm).modelContainer(container),
@@ -32,7 +31,7 @@ struct SnapshotTests {
         )
     }
 
-    @Test func rendersWithStreak() throws {
+    func testRendersWithStreak() throws {
         let (vm, container) = try makeVM(oz: 64, priorDaysMeetingGoal: 2)
         assertSnapshot(
             of: TodayView(viewModel: vm).modelContainer(container),
