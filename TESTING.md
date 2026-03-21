@@ -552,14 +552,14 @@ This section translates the six recommendations above into concrete, ordered wor
 |---|---------------|--------|
 | 1 | swift-snapshot-testing | Not started |
 | 2 | In-memory SwiftData containers in all integration tests | **Done** — `TestHelpers.makeContainer()` is used in every test |
-| 3 | `--uitesting` + `--seed-*` launch argument handling | Not started |
+| 3 | `--uitesting` + `--seed-*` launch argument handling | **Done** — merged in PR #12 |
 | 4 | GitHub Actions CI | Partial — workflow exists but lacks `CODE_SIGNING_ALLOWED=NO`, artifact upload, xcresulttool reporting |
 | 5 | Exclude UI tests from CI by default | **Done** — workflow runs `-only-testing:lifetrakTests` only |
 | 6 | `xcresulttool` as authoritative source of truth | Not wired into CI |
 
 ---
 
-### Step 1 — `--uitesting` + `--seed-*` launch argument handling (Rec 3)
+### Step 1 — `--uitesting` + `--seed-*` launch argument handling (Rec 3) ✅ Done (PR #12)
 
 #### `lifetrak/AccessibilityIdentifiers.swift` — create
 

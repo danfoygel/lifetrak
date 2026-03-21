@@ -5,19 +5,6 @@
 
 import XCTest
 
-// AXID constants mirrored from AccessibilityIdentifiers.swift.
-// Keep in sync if identifiers change. See lifetrak/AccessibilityIdentifiers.swift.
-private enum AXID {
-    enum Today {
-        static let progressRing  = "progressRing"
-        static let progressLabel = "progressLabel"
-        static let logButton     = "logWaterButton"
-        static let streakLabel   = "streakLabel"
-        static let weeklyChart   = "weeklyChart"
-        static let entryList     = "entryList"
-    }
-}
-
 class LifetrakUITestCase: XCTestCase {
     var app: XCUIApplication!
 
