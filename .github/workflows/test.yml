@@ -7,24 +7,52 @@ on:
     branches: [main]
 
 jobs:
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      src: ${{ steps.filter.outputs.src }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            src:
+              - 'lifetrak/**'
+              - 'lifetrakTests/**'
+              - 'lifetrakUITests/**'
+              - 'lifetrak.xcodeproj/**'
+              - '.github/workflows/test.yml'
+
   test:
+    needs: changes
+    if: needs.changes.outputs.src == 'true'
     runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
 
       - name: Select Xcode
+        id: xcode
         run: |
           # Find the latest Xcode that supports iOS 26 (the project's deployment target)
           XCODE_PATH=$(ls -d /Applications/Xcode*.app 2>/dev/null | sort -V | tail -1)
           echo "Using: $XCODE_PATH"
           sudo xcode-select -s "$XCODE_PATH/Contents/Developer"
           xcodebuild -version
+          echo "version=$(xcodebuild -version | head -1 | tr ' ' '-')" >> "$GITHUB_OUTPUT"
 
-      - name: List available simulators
-        run: xcrun simctl list devices available
-
-      - name: Build
-        run: xcodebuild -scheme lifetrak -destination 'platform=iOS Simulator,name=iPhone 16 Pro' build
+      - name: Cache SDK stat cache
+        uses: actions/cache@v4
+        with:
+          path: ~/Library/Developer/Xcode/DerivedData/SDKStatCaches.noindex
+          key: ${{ runner.os }}-sdkstatcache-${{ steps.xcode.outputs.version }}
 
       - name: Test
-        run: xcodebuild -scheme lifetrak -destination 'platform=iOS Simulator,name=iPhone 16 Pro' -only-testing:lifetrakTests test
+        run: |
+          xcodebuild -scheme lifetrak \
+            -destination 'platform=iOS Simulator,name=iPhone 16 Pro' \
+            -only-testing:lifetrakTests \
+            -skip-testing:lifetrakUITests \
+            SWIFT_ENABLE_CODE_COVERAGE=NO \
+            COMPILER_INDEX_STORE_ENABLE=NO \
+            test
