@@ -47,22 +47,10 @@ jobs:
           path: ~/Library/Developer/Xcode/DerivedData/SDKStatCaches.noindex
           key: ${{ runner.os }}-sdkstatcache-${{ steps.xcode.outputs.version }}
 
-      - name: Download iOS 26.3 simulator runtime
-        run: |
-          # CI ships with iOS 26.2 runtimes; reference snapshots are recorded against
-          # iOS 26.3 (the runtime bundled with local Xcode). Download it so the
-          # destination resolves and rendering matches the committed references.
-          xcodebuild -downloadPlatform iOS
-
-      - name: Create iPhone 16 Pro simulator (iOS 26.3)
-        run: |
-          xcrun simctl create "iPhone 16 Pro" "iPhone 16 Pro" \
-            com.apple.CoreSimulator.SimRuntime.iOS-26-3
-
       - name: Test
         run: |
           xcodebuild -scheme lifetrak \
-            -destination 'platform=iOS Simulator,name=iPhone 16 Pro,OS=26.3' \
+            -destination 'platform=iOS Simulator,name=iPhone 16 Pro' \
             -only-testing:lifetrakTests \
             -skip-testing:lifetrakUITests \
             SWIFT_ENABLE_CODE_COVERAGE=NO \
