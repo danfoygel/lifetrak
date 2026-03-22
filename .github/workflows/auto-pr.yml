@@ -13,35 +13,28 @@ jobs:
       pull-requests: write
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Create PR if one doesn't exist
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          set -xe
           BRANCH="${GITHUB_REF#refs/heads/}"
-          echo "Branch: $BRANCH"
-          echo "Repo: $GITHUB_REPOSITORY"
+          TITLE=$(git log -1 --pretty=%s)
+          echo "Branch: $BRANCH, Title: $TITLE"
 
-          # Check if a PR already exists for this branch using GitHub API directly
-          EXISTING=$(curl -s \
-            -H "Authorization: Bearer $GITHUB_TOKEN" \
-            -H "Accept: application/vnd.github.v3+json" \
-            "https://api.github.com/repos/$GITHUB_REPOSITORY/pulls?head=${GITHUB_REPOSITORY%%/*}:$BRANCH&base=main&state=open" \
-            | python3 -c "import sys,json; prs=json.load(sys.stdin); print(prs[0]['number'] if prs else '')" 2>/dev/null || echo "")
-          echo "Existing PR: '$EXISTING'"
-
+          # Check for existing open PR
+          EXISTING=$(gh pr list --repo "$GITHUB_REPOSITORY" \
+            --head "$BRANCH" --base main --state open \
+            --json number --jq '.[0].number' 2>/dev/null || echo "")
           if [ -n "$EXISTING" ]; then
-            echo "PR #$EXISTING already exists for branch $BRANCH"
+            echo "PR #$EXISTING already exists"
           else
-            TITLE=$(git log -1 --pretty=%s)
-            echo "Creating PR with title: $TITLE"
-            RESPONSE=$(curl -s -X POST \
-              -H "Authorization: Bearer $GITHUB_TOKEN" \
-              -H "Accept: application/vnd.github.v3+json" \
-              -H "Content-Type: application/json" \
-              "https://api.github.com/repos/$GITHUB_REPOSITORY/pulls" \
-              -d "{\"title\": \"$TITLE\", \"head\": \"$BRANCH\", \"base\": \"main\", \"body\": \"Automated PR from branch \\\`$BRANCH\\\`.\"}")
-            echo "Response: $RESPONSE"
-            echo "$RESPONSE" | python3 -c "import sys,json; d=json.load(sys.stdin); print('PR created:', d.get('html_url', d.get('message', 'unknown')))"
+            gh pr create \
+              --repo "$GITHUB_REPOSITORY" \
+              --base main \
+              --head "$BRANCH" \
+              --title "$TITLE" \
+              --body "Automated PR from branch \`$BRANCH\`."
           fi
