@@ -700,10 +700,10 @@ final class TodayViewUITests: LifetrakUITestCase {
 - Used `.iPhone13Pro` device config (1.19.1 does not include `.iPhone16Pro`; update when the library adds it)
 - `precision: 0.99` used on all tests — absorbs sub-pixel anti-aliasing differences between iOS 26.2 (CI, macos-15 runner) and iOS 26.3.x (local). Without this, the partial-arc in the progress ring causes ~0.3% pixel difference that would fail a strict comparison.
 - Reference snapshots recorded with `-parallel-testing-enabled NO` to prevent race conditions during initial recording; subsequent runs work normally
-- 8 reference PNGs committed in `lifetrakTests/__Snapshots__/SnapshotTests/` — see "Dual runner" note below
+- 4 reference PNGs committed in `lifetrakTests/__Snapshots__/SnapshotTests/` — one per test, using the `named: "1"` fix (see "Dual runner" note below)
 
-**Dual runner (why there are `.1.png` and `.2.png` files):**
-xcodebuild runs Swift Testing suites through two runners simultaneously: the native Swift Testing runner and an XCTest bridge. Each runner independently calls `assertSnapshot`, which means each `@Test` function records/compares two reference files. The `.1.png` file is compared by the XCTest bridge; the `.2.png` file by the native Swift Testing runner. Both must be committed and both are checked on every CI run. This is normal behavior — it is not a bug or a sign of duplicate test execution in the business-logic sense.
+**Dual runner (resolved — why snapshots use `named: "1"`):**
+xcodebuild runs Swift Testing suites through two runners simultaneously: the native Swift Testing runner and an XCTest bridge. Each runner independently calls `assertSnapshot`, which previously caused each `@Test` function to record two reference files (`.1.png` and `.2.png`) because `assertSnapshot` auto-increments a counter per test name. The fix is to pass `named: "1"` explicitly to `assertSnapshot`. The `named:` parameter replaces the auto-increment counter, so both runners write to / compare against the same file (e.g. `rendersEmptyState.1.png`). Only 4 reference PNGs are needed — one per test.
 
 #### `lifetrakTests/SnapshotTests.swift` — created
 
@@ -724,7 +724,8 @@ struct SnapshotTests {
         let (vm, container) = try makeVM(oz: 0)
         assertSnapshot(
             of: TodayView(viewModel: vm).modelContainer(container),
-            as: .image(precision: 0.99, layout: .device(config: .iPhone13Pro))
+            as: .image(precision: 0.99, layout: .device(config: .iPhone13Pro)),
+            named: "1"
         )
     }
 
@@ -734,7 +735,7 @@ struct SnapshotTests {
 
 A private `makeVM(oz:priorDaysMeetingGoal:)` helper creates the in-memory container, inserts the water Activity + Routine + Goal, inserts the appropriate Event records, saves, and returns `(TodayViewModel, ModelContainer)`. The `ModelContainer` is passed to `.modelContainer()` on the view because `TodayView` uses `@Query` internally which requires a container in the environment.
 
-**First run records reference images** into `lifetrakTests/__Snapshots__/SnapshotTests/`. Commit this directory (both `.1.png` and `.2.png` files). All subsequent runs diff against those images.
+**First run records reference images** into `lifetrakTests/__Snapshots__/SnapshotTests/`. Commit this directory (one `.1.png` per test, 4 files total). All subsequent runs diff against those images.
 
 **Important**: reference snapshots must be recorded on the same simulator model used in CI (iPhone 16 Pro, as configured in the workflow). If you record locally on a different device, snapshot tests will fail in CI.
 
@@ -816,37 +817,38 @@ The only step requiring Xcode GUI is adding the `swift-snapshot-testing` SPM pac
 
 ---
 
-### Known issue — snapshot tests execute twice, producing duplicate reference files
+### Dual runner — duplicate reference files (resolved)
 
-**Status: open / not yet fixed**
+**Status: fixed** — each test now produces exactly one reference PNG.
 
-#### What happens
+#### What happened
 
-Each `@Test` function in `SnapshotTests` produces two reference PNG files — e.g. `rendersGoalMet.1.png` and `rendersGoalMet.2.png`. Both are identical in content. Both must be committed or CI fails.
+Each `@Test` function in `SnapshotTests` previously produced two identical reference PNG files — e.g. `rendersGoalMet.1.png` and `rendersGoalMet.2.png`. Both had to be committed or CI would fail.
 
-#### Why it happens
+#### Why it happened
 
-When `xcodebuild test` runs a target that contains Swift Testing `@Test` functions, it launches two runners in the same process:
+When `xcodebuild test` runs a target containing Swift Testing `@Test` functions, it launches two runners in the same process:
 
 1. **Native Swift Testing runner** — the real runner, designed for `@Test` functions
-2. **XCTest bridge** — a compatibility shim that re-exposes every `@Test` function as an `XCTestCase` method so xcodebuild's reporting pipeline (which was built around XCTest) can discover and track results
+2. **XCTest bridge** — a compatibility shim that re-exposes every `@Test` function as an `XCTestCase` method so xcodebuild's reporting pipeline can discover and track results
 
-Both runners execute the test body. `assertSnapshot` doesn't know which runner called it — it just increments a counter per test name to pick a filename. First call → `.1.png`, second call → `.2.png`.
+Both runners execute the test body. `assertSnapshot` auto-increments a counter per test name to pick a filename. First call → `.1.png`, second call → `.2.png`.
 
-#### Why both files must be committed
+#### Fix: pass `named: "1"` explicitly
 
-On a comparison run, `assertSnapshot` checks whether the reference file exists before comparing. If `.1.png` exists but `.2.png` is missing, the second runner treats the missing file as a new recording, writes it to disk, and **fails the test** (recording mode always fails by design — it's signalling "new reference written, please verify"). So omitting either file causes half the test invocations to always fail.
+Passing `named: "1"` to `assertSnapshot` replaces the auto-increment counter with an explicit identifier. Both runners resolve to the same filename (e.g. `rendersEmptyState.1.png`), so only one reference file per test is needed. The `.2.png` files were deleted.
 
-#### What was tried and didn't work
+```swift
+assertSnapshot(
+    of: TodayView(viewModel: vm).modelContainer(container),
+    as: .image(precision: 0.99, layout: .device(config: .iPhone13Pro)),
+    named: "1"
+)
+```
 
-Converting `SnapshotTests` from Swift Testing (`@Suite`/`@Test`) to `XCTestCase` eliminates the bridge runner, giving only one invocation per test and only `.1.png` files. However, `XCTestCase` + `@MainActor` renders SwiftUI views differently from Swift Testing + `@MainActor` on the same machine and iOS version — approximately 4–5% pixel difference across all four tests. Because `@MainActor` cannot be removed (SwiftData `ModelContext` requires main-actor isolation), this approach produced four new failures and was reverted.
+#### What was tried and didn't work (historical)
 
-#### Options to investigate
-
-- **Suppress the XCTest bridge for this target** — check whether a build setting or test plan option can disable the bridge runner for targets that use only Swift Testing. The flag `-only-testing` selects test classes/methods but does not select a runner.
-- **Use `SnapshotTesting`'s `withSnapshotTesting` API** — newer versions of the library may offer a way to name snapshots explicitly rather than relying on the auto-increment counter, which would let both runners write to the same file instead of `.1.png` / `.2.png`.
-- **File a radar / watch SE proposals** — the dual-runner behavior is an Apple toolchain issue. It may be resolved in a future Xcode release.
-- **Accept the duplication** — 8 files instead of 4 is low cost. If none of the above pan out cleanly, leaving it as-is is a reasonable long-term position.
+Converting `SnapshotTests` from Swift Testing (`@Suite`/`@Test`) to `XCTestCase` eliminates the bridge runner, giving only one invocation per test. However, `XCTestCase` + `@MainActor` renders SwiftUI views differently from Swift Testing + `@MainActor` — approximately 4–5% pixel difference across all four tests. Because `@MainActor` cannot be removed (SwiftData `ModelContext` requires main-actor isolation), this approach produced four new failures and was reverted.
 
 ---
 
