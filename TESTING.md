@@ -20,7 +20,7 @@ xcodebuild -scheme lifetrak \
 # Single test
 xcodebuild -scheme lifetrak \
   -destination 'platform=iOS Simulator,name=iPhone 16 Pro' \
-  -only-testing:'lifetrakTests/AllTests/todayVM_streakBreaksOnMissedDay' test
+  -only-testing:'lifetrakTests/AllTests/todayVM_streak' test
 
 # UI tests (run locally only — excluded from CI)
 xcodebuild -scheme lifetrak \
@@ -69,11 +69,21 @@ Available seeds (implemented in `UITestSeeder.swift`):
 - `--seed-goal-met` — 8×8 oz today (64/64 oz)
 - `--seed-water-history` — 64 oz/day for 30 days (30-day streak)
 
-Accessibility identifiers are defined in `AccessibilityIdentifiers.swift` (`AXID.Today.*`).
+Accessibility identifiers are defined in `AccessibilityIdentifiers.swift`. Namespaces:
+- `AXID.Today.*` — progress ring, log button, streak label, weekly chart, entry list
+- `AXID.History.*` — `addButton`, `entryList`, `entryRow`
 
 ### Snapshot tests
 
-`SnapshotTesting` 1.19.1 via SPM. Four tests in `SnapshotTests.swift` cover `TodayView` (empty, partial, goal met, streak). Reference PNGs are in `lifetrakTests/__Snapshots__/SnapshotTests/`.
+`SnapshotTesting` 1.19.1 via SPM. `SnapshotTests.swift` contains three suites:
+
+| Suite | Tests | Reference PNGs |
+|-------|-------|----------------|
+| `TodayView Snapshots` | 4 (empty, partial, goal met, streak) | `__Snapshots__/SnapshotTests/` |
+| `HistoryView Snapshots` | 3 (empty, with entries, with sleep+water) | `__Snapshots__/HistoryViewSnapshotTests/` |
+| `SleepCard Snapshots` | 2 (with stages, without stages) | `__Snapshots__/SleepCardSnapshotTests/` |
+
+`HistoryView` accepts an optional `viewModel` parameter for injection (mirrors `TodayView`), allowing snapshot tests to pre-load data without relying on `.onAppear`.
 
 Two quirks to know:
 
@@ -94,6 +104,8 @@ Workflow: `.github/workflows/test.yml`. Runs on `macos-15`, auto-selects the new
 
 Key flags: `CODE_SIGNING_ALLOWED=NO`, `SWIFT_ENABLE_CODE_COVERAGE=NO`, `COMPILER_INDEX_STORE_ENABLE=NO`.
 
+**Snapshot bootstrap**: The test step runs `xcodebuild` twice (`RUN_TESTS || RUN_TESTS`). SnapshotTesting's default `record: .missing` mode records new reference PNGs to disk on the first run (and fails), then the second run compares against them and passes. Real failures (logic errors, comparison mismatches against committed PNGs) fail on both runs.
+
 A `Test summary` step runs `xcresulttool get test-results summary --compact` after every run (pass or fail). On failure, the full `.xcresult` bundle is uploaded as an artifact (7-day retention).
 
 UI tests are excluded from CI (`-skip-testing:lifetrakUITests`). Run them locally before merging.
@@ -110,7 +122,7 @@ xcrun xcresulttool get test-results summary --path "$RESULT" --compact
 # Details for one failing test
 xcrun xcresulttool get test-results test-details \
   --path "$RESULT" \
-  --test-id 'AllTests/todayVM_streakBreaksOnMissedDay()' \
+  --test-id 'AllTests/todayVM_streak(skipsYesterday)' \
   --compact
 
 # Export failure images (snapshot diffs, UI test screenshots)
@@ -130,19 +142,15 @@ Use `xcresulttool` over MCP output when the test suite is large — MCP truncate
 | `RoutineSchedule` model | 2 |
 | `TodayViewModel` (progress, streak, weekly, settings, edges) | 25 |
 | `HistoryViewModel` (grouping, CRUD, sort) | 10 |
+| `HistoryViewModel` + `MockHealthKitService` (sleep merge, auth, failures) | 9 |
 | `SleepNight` model + `TimeInterval.sleepFormatted` | 7 |
 | `SleepAggregator` | 6+ |
 | Snapshot (`TodayView`) | 4 |
+| Snapshot (`HistoryView`) | 3 |
+| Snapshot (`SleepCard`) | 2 |
 | UI tests (`TodayView`) | 3 |
+| UI tests (`HistoryView`) | 3 |
 
-`MockHealthKitService` (implements `HealthKitServiceProtocol`) exists in `lifetrakTests/` but is not yet wired into any test.
+### Notes on streak tests
 
-## Remaining work
-
-1. **Snapshot tests for `HistoryView` and `SleepCard`** — follow the same `makeVM` / `named: "1"` pattern in `SnapshotTests.swift`.
-
-2. **`MockHealthKitService` tests** — when `HistoryViewModel` (or a future `SleepViewModel`) takes a `HealthKitServiceProtocol` init parameter, add tests for: successful fetch, auth failure, query failure.
-
-3. **UI tests for `HistoryView`** — infrastructure is ready. Add `AXID.History.*` constants and `.accessibilityIdentifier(...)` calls to the view, then cover swipe-to-delete and edit flows.
-
-4. **Parameterized streak tests** — the five streak tests in `AllTests` are good candidates for `@Test(arguments:)` to reduce boilerplate and make adding new boundary cases easy.
+The five streak boundary cases are covered by a single parameterized test `todayVM_streak` in `AllTests` using `@Test(arguments:)` with a `StreakCase` struct. Cases: `noEntries`, `todayOnly`, `threeConsecutive`, `skipsYesterday`, `onlyPriorDays`. To add a new boundary case, append a `StreakCase` to the arguments array.
