@@ -697,19 +697,22 @@ final class TodayViewUITests: LifetrakUITestCase {
 **Implementation notes:**
 - `SnapshotTesting` 1.19.1 added via SPM by editing `project.pbxproj` directly (no manual Xcode step needed)
 - `Package.resolved` generated via `xcodebuild -resolvePackageDependencies`
-- Used `.iPhone13Pro` device config (1.19.1 does not include `.iPhone16`; update when the library adds it)
+- Used `.iPhone13Pro` device config (1.19.1 does not include `.iPhone16Pro`; update when the library adds it)
+- `precision: 0.99` used on all tests — absorbs sub-pixel anti-aliasing differences between iOS 26.2 (CI, macos-15 runner) and iOS 26.3.x (local). Without this, the partial-arc in the progress ring causes ~0.3% pixel difference that would fail a strict comparison.
 - Reference snapshots recorded with `-parallel-testing-enabled NO` to prevent race conditions during initial recording; subsequent runs work normally
-- 4 reference PNGs committed in `lifetrakTests/__Snapshots__/SnapshotTests/`
+- 8 reference PNGs committed in `lifetrakTests/__Snapshots__/SnapshotTests/` — see "Dual runner" note below
+
+**Dual runner (why there are `.1.png` and `.2.png` files):**
+xcodebuild runs Swift Testing suites through two runners simultaneously: the native Swift Testing runner and an XCTest bridge. Each runner independently calls `assertSnapshot`, which means each `@Test` function records/compares two reference files. The `.1.png` file is compared by the XCTest bridge; the `.2.png` file by the native Swift Testing runner. Both must be committed and both are checked on every CI run. This is normal behavior — it is not a bug or a sign of duplicate test execution in the business-logic sense.
 
 #### `lifetrakTests/SnapshotTests.swift` — created
 
-#### `lifetrakTests/SnapshotTests.swift` — create
-
-A `@Suite(.serialized)` struct with four tests. Each test builds a `TodayViewModel` from an in-memory container pre-seeded to a specific state, constructs a `TodayView(viewModel: vm)` using the injected-VM init added in Step 1, and calls `assertSnapshot`:
+A `@MainActor @Suite(.serialized)` struct with four tests. Each test builds a `TodayViewModel` from an in-memory container pre-seeded to a specific state, constructs a `TodayView(viewModel: vm)` using the injected-VM init added in Step 1, and calls `assertSnapshot`:
 
 ```swift
 import SnapshotTesting
 import SwiftUI
+import SwiftData
 import Testing
 @testable import lifetrak
 
@@ -718,44 +721,22 @@ import Testing
 struct SnapshotTests {
 
     @Test func rendersEmptyState() throws {
-        let vm = try makeVM(oz: 0)
+        let (vm, container) = try makeVM(oz: 0)
         assertSnapshot(
-            of: TodayView(viewModel: vm),
-            as: .image(layout: .device(config: .iPhone16))
+            of: TodayView(viewModel: vm).modelContainer(container),
+            as: .image(precision: 0.99, layout: .device(config: .iPhone13Pro))
         )
     }
 
-    @Test func rendersPartialProgress() throws {
-        let vm = try makeVM(oz: 24)   // 24/64 = 37.5%
-        assertSnapshot(
-            of: TodayView(viewModel: vm),
-            as: .image(layout: .device(config: .iPhone16))
-        )
-    }
-
-    @Test func rendersGoalMet() throws {
-        let vm = try makeVM(oz: 64)   // green ring + "Goal reached!"
-        assertSnapshot(
-            of: TodayView(viewModel: vm),
-            as: .image(layout: .device(config: .iPhone16))
-        )
-    }
-
-    @Test func rendersWithStreak() throws {
-        let vm = try makeVM(oz: 64, priorDaysMeetingGoal: 2)
-        assertSnapshot(
-            of: TodayView(viewModel: vm),
-            as: .image(layout: .device(config: .iPhone16))
-        )
-    }
+    // ... rendersPartialProgress, rendersGoalMet, rendersWithStreak
 }
 ```
 
-A private `makeVM(oz:priorDaysMeetingGoal:)` helper creates the in-memory container, inserts the water Activity + Routine + Goal, inserts the appropriate Event records, and returns a `TodayViewModel`.
+A private `makeVM(oz:priorDaysMeetingGoal:)` helper creates the in-memory container, inserts the water Activity + Routine + Goal, inserts the appropriate Event records, saves, and returns `(TodayViewModel, ModelContainer)`. The `ModelContainer` is passed to `.modelContainer()` on the view because `TodayView` uses `@Query` internally which requires a container in the environment.
 
-**First run records reference images** into `lifetrakTests/__Snapshots__/SnapshotTests/`. Commit this directory. All subsequent runs diff against those images.
+**First run records reference images** into `lifetrakTests/__Snapshots__/SnapshotTests/`. Commit this directory (both `.1.png` and `.2.png` files). All subsequent runs diff against those images.
 
-**Important**: reference snapshots must be recorded on the same simulator model used in CI (iPhone 16 Pro, as configured in the workflow). If you record locally on a different device, snapshot tests will always fail in CI.
+**Important**: reference snapshots must be recorded on the same simulator model used in CI (iPhone 16 Pro, as configured in the workflow). If you record locally on a different device, snapshot tests will fail in CI.
 
 ---
 
