@@ -567,7 +567,7 @@ struct AllTests {
     // MARK: - TodayViewModel: Streak
     // =========================================================================
 
-    private struct StreakCase: CustomTestStringConvertible, Sendable {
+    struct StreakCase: CustomTestStringConvertible, Sendable {
         let daysMetGoal: [Int]   // days-ago offsets where goal (64 oz) was met
         let expected: Int
         var testDescription: String

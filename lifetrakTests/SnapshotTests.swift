@@ -76,7 +76,7 @@ struct SnapshotTests {
 @Suite("HistoryView Snapshots", .serialized)
 struct HistoryViewSnapshotTests {
 
-    @Test func rendersEmptyState() throws {
+    @Test func historyView_rendersEmptyState() throws {
         let container = try TestHelpers.makeContainer()
         let context = container.mainContext
         TestHelpers.makeWaterActivity(context: context)
