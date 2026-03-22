@@ -10,4 +10,9 @@ enum AXID {
         static let weeklyChart   = "weeklyChart"
         static let entryList     = "entryList"
     }
+    enum History {
+        static let addButton  = "historyAddButton"
+        static let entryList  = "historyEntryList"
+        static let entryRow   = "historyEntryRow"
+    }
 }

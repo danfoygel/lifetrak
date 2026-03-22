@@ -41,3 +41,46 @@ final class TodayViewUITests: LifetrakUITestCase {
         XCTAssertTrue(streak.staticTexts["30-day streak"].exists)
     }
 }
+
+final class HistoryViewUITests: LifetrakUITestCase {
+
+    private func navigateToHistory() {
+        app.tabBars.buttons["History"].tap()
+    }
+
+    func testEntriesAppearInHistory() {
+        launch(args: ["--seed-partial-day"])
+        navigateToHistory()
+        // --seed-partial-day creates 3 × 8 oz entries; at least one "8 oz" cell should appear
+        XCTAssertTrue(app.staticTexts["8 oz"].waitForExistence(timeout: 5))
+    }
+
+    func testSwipeToDeleteEntry() {
+        launch(args: ["--seed-partial-day"])
+        navigateToHistory()
+
+        // Wait for entries to appear, then count them
+        XCTAssertTrue(app.staticTexts["8 oz"].waitForExistence(timeout: 5))
+        let cellsBefore = app.cells.matching(identifier: AXID.History.entryRow).count
+
+        // Swipe the first entry row left to reveal the Delete action
+        let firstEntry = app.cells.matching(identifier: AXID.History.entryRow).firstMatch
+        firstEntry.swipeLeft()
+        app.buttons["Delete"].tap()
+
+        // One fewer entry row should remain
+        let cellsAfter = app.cells.matching(identifier: AXID.History.entryRow).count
+        XCTAssertEqual(cellsAfter, cellsBefore - 1)
+    }
+
+    func testTapEntryOpensEditSheet() {
+        launch(args: ["--seed-partial-day"])
+        navigateToHistory()
+
+        // Tap the first entry row to open the edit sheet
+        XCTAssertTrue(app.staticTexts["8 oz"].waitForExistence(timeout: 5))
+        app.cells.matching(identifier: AXID.History.entryRow).firstMatch.tap()
+
+        XCTAssertTrue(app.navigationBars["Edit Entry"].waitForExistence(timeout: 5))
+    }
+}

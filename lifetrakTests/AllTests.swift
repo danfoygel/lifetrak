@@ -567,72 +567,34 @@ struct AllTests {
     // MARK: - TodayViewModel: Streak
     // =========================================================================
 
-    @Test func todayVM_streakZeroWhenNoEntries() throws {
-        let container = try TestHelpers.makeContainer()
-        let vm = TodayViewModel(modelContext: container.mainContext)
-
-        #expect(vm.currentStreak == 0)
+    private struct StreakCase: CustomTestStringConvertible, Sendable {
+        let daysMetGoal: [Int]   // days-ago offsets where goal (64 oz) was met
+        let expected: Int
+        var testDescription: String
     }
 
-    @Test func todayVM_streakOneWhenGoalMetToday() throws {
-        let container = try TestHelpers.makeContainer()
-        let vm = TodayViewModel(modelContext: container.mainContext)
-
-        for _ in 0..<8 { vm.logWater() }
-        #expect(vm.currentStreak == 1)
-    }
-
-    @Test func todayVM_streakCountsConsecutiveDays() throws {
+    @Test(arguments: [
+        StreakCase(daysMetGoal: [],          expected: 0, testDescription: "noEntries"),
+        StreakCase(daysMetGoal: [0],         expected: 1, testDescription: "todayOnly"),
+        StreakCase(daysMetGoal: [0, 1, 2],  expected: 3, testDescription: "threeConsecutive"),
+        StreakCase(daysMetGoal: [0, 2],      expected: 1, testDescription: "skipsYesterday"),
+        StreakCase(daysMetGoal: [1, 2],      expected: 2, testDescription: "onlyPriorDays"),
+    ])
+    func todayVM_streak(_ c: StreakCase) throws {
         let container = try TestHelpers.makeContainer()
         let context = container.mainContext
 
         let activity = TestHelpers.makeWaterActivity(context: context)
         TestHelpers.makeDefaultRoutine(context: context, waterActivity: activity)
 
-        // Meet goal today + yesterday + day before
-        for daysAgo in 0..<3 {
+        for daysAgo in c.daysMetGoal {
             let date = Calendar.current.date(byAdding: .day, value: -daysAgo, to: .now)!
             context.insert(Event(activity: activity, timestamp: date, quantity: 64.0))
         }
         try context.save()
 
         let vm = TodayViewModel(modelContext: context)
-        #expect(vm.currentStreak == 3)
-    }
-
-    @Test func todayVM_streakBreaksOnMissedDay() throws {
-        let container = try TestHelpers.makeContainer()
-        let context = container.mainContext
-
-        let activity = TestHelpers.makeWaterActivity(context: context)
-        TestHelpers.makeDefaultRoutine(context: context, waterActivity: activity)
-
-        // Meet goal today and 2 days ago (skip yesterday)
-        context.insert(Event(activity: activity, quantity: 64.0))
-        let twoDaysAgo = Calendar.current.date(byAdding: .day, value: -2, to: .now)!
-        context.insert(Event(activity: activity, timestamp: twoDaysAgo, quantity: 64.0))
-        try context.save()
-
-        let vm = TodayViewModel(modelContext: context)
-        #expect(vm.currentStreak == 1) // only today counts
-    }
-
-    @Test func todayVM_streakStartsFromYesterday() throws {
-        let container = try TestHelpers.makeContainer()
-        let context = container.mainContext
-
-        let activity = TestHelpers.makeWaterActivity(context: context)
-        TestHelpers.makeDefaultRoutine(context: context, waterActivity: activity)
-
-        // Goal met yesterday and day before, but NOT today
-        for daysAgo in 1..<3 {
-            let date = Calendar.current.date(byAdding: .day, value: -daysAgo, to: .now)!
-            context.insert(Event(activity: activity, timestamp: date, quantity: 64.0))
-        }
-        try context.save()
-
-        let vm = TodayViewModel(modelContext: context)
-        #expect(vm.currentStreak == 2)
+        #expect(vm.currentStreak == c.expected)
     }
 
     // =========================================================================
