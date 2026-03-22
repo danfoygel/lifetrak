@@ -816,6 +816,40 @@ The only step requiring Xcode GUI is adding the `swift-snapshot-testing` SPM pac
 
 ---
 
+### Known issue — snapshot tests execute twice, producing duplicate reference files
+
+**Status: open / not yet fixed**
+
+#### What happens
+
+Each `@Test` function in `SnapshotTests` produces two reference PNG files — e.g. `rendersGoalMet.1.png` and `rendersGoalMet.2.png`. Both are identical in content. Both must be committed or CI fails.
+
+#### Why it happens
+
+When `xcodebuild test` runs a target that contains Swift Testing `@Test` functions, it launches two runners in the same process:
+
+1. **Native Swift Testing runner** — the real runner, designed for `@Test` functions
+2. **XCTest bridge** — a compatibility shim that re-exposes every `@Test` function as an `XCTestCase` method so xcodebuild's reporting pipeline (which was built around XCTest) can discover and track results
+
+Both runners execute the test body. `assertSnapshot` doesn't know which runner called it — it just increments a counter per test name to pick a filename. First call → `.1.png`, second call → `.2.png`.
+
+#### Why both files must be committed
+
+On a comparison run, `assertSnapshot` checks whether the reference file exists before comparing. If `.1.png` exists but `.2.png` is missing, the second runner treats the missing file as a new recording, writes it to disk, and **fails the test** (recording mode always fails by design — it's signalling "new reference written, please verify"). So omitting either file causes half the test invocations to always fail.
+
+#### What was tried and didn't work
+
+Converting `SnapshotTests` from Swift Testing (`@Suite`/`@Test`) to `XCTestCase` eliminates the bridge runner, giving only one invocation per test and only `.1.png` files. However, `XCTestCase` + `@MainActor` renders SwiftUI views differently from Swift Testing + `@MainActor` on the same machine and iOS version — approximately 4–5% pixel difference across all four tests. Because `@MainActor` cannot be removed (SwiftData `ModelContext` requires main-actor isolation), this approach produced four new failures and was reverted.
+
+#### Options to investigate
+
+- **Suppress the XCTest bridge for this target** — check whether a build setting or test plan option can disable the bridge runner for targets that use only Swift Testing. The flag `-only-testing` selects test classes/methods but does not select a runner.
+- **Use `SnapshotTesting`'s `withSnapshotTesting` API** — newer versions of the library may offer a way to name snapshots explicitly rather than relying on the auto-increment counter, which would let both runners write to the same file instead of `.1.png` / `.2.png`.
+- **File a radar / watch SE proposals** — the dual-runner behavior is an Apple toolchain issue. It may be resolved in a future Xcode release.
+- **Accept the duplication** — 8 files instead of 4 is low cost. If none of the above pan out cleanly, leaving it as-is is a reasonable long-term position.
+
+---
+
 ## References
 
 - [pointfreeco/swift-snapshot-testing](https://github.com/pointfreeco/swift-snapshot-testing)
