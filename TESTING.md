@@ -550,7 +550,7 @@ This section translates the six recommendations above into concrete, ordered wor
 
 | # | Recommendation | Status |
 |---|---------------|--------|
-| 1 | swift-snapshot-testing | Not started |
+| 1 | swift-snapshot-testing | **Done** — `SnapshotTesting` 1.19.1 added via SPM; `SnapshotTests.swift` created with 4 tests; reference images recorded |
 | 2 | In-memory SwiftData containers in all integration tests | **Done** — `TestHelpers.makeContainer()` is used in every test |
 | 3 | `--uitesting` + `--seed-*` launch argument handling | **Done** — merged in PR #12 |
 | 4 | GitHub Actions CI | Partial — workflow exists but lacks `CODE_SIGNING_ALLOWED=NO`, artifact upload, xcresulttool reporting |
@@ -692,21 +692,27 @@ final class TodayViewUITests: LifetrakUITestCase {
 
 ---
 
-### Step 2 — swift-snapshot-testing (Rec 1)
+### Step 2 — swift-snapshot-testing (Rec 1) ✅ DONE
 
-#### Manual prerequisite (cannot be scripted)
+**Implementation notes:**
+- `SnapshotTesting` 1.19.1 added via SPM by editing `project.pbxproj` directly (no manual Xcode step needed)
+- `Package.resolved` generated via `xcodebuild -resolvePackageDependencies`
+- Used `.iPhone13Pro` device config (1.19.1 does not include `.iPhone16Pro`; update when the library adds it)
+- `precision: 0.99` used on all tests — absorbs sub-pixel anti-aliasing differences between iOS 26.2 (CI, macos-15 runner) and iOS 26.3.x (local). Without this, the partial-arc in the progress ring causes ~0.3% pixel difference that would fail a strict comparison.
+- Reference snapshots recorded with `-parallel-testing-enabled NO` to prevent race conditions during initial recording; subsequent runs work normally
+- 8 reference PNGs committed in `lifetrakTests/__Snapshots__/SnapshotTests/` — see "Dual runner" note below
 
-In Xcode: File → Add Package Dependencies → enter `https://github.com/pointfreeco/swift-snapshot-testing`, set version to `≥ 1.17.0`, add `SnapshotTesting` to the **lifetrakTests** target only.
+**Dual runner (why there are `.1.png` and `.2.png` files):**
+xcodebuild runs Swift Testing suites through two runners simultaneously: the native Swift Testing runner and an XCTest bridge. Each runner independently calls `assertSnapshot`, which means each `@Test` function records/compares two reference files. The `.1.png` file is compared by the XCTest bridge; the `.2.png` file by the native Swift Testing runner. Both must be committed and both are checked on every CI run. This is normal behavior — it is not a bug or a sign of duplicate test execution in the business-logic sense.
 
-This step must be done in Xcode before the test file below will compile.
+#### `lifetrakTests/SnapshotTests.swift` — created
 
-#### `lifetrakTests/SnapshotTests.swift` — create
-
-A `@Suite(.serialized)` struct with four tests. Each test builds a `TodayViewModel` from an in-memory container pre-seeded to a specific state, constructs a `TodayView(viewModel: vm)` using the injected-VM init added in Step 1, and calls `assertSnapshot`:
+A `@MainActor @Suite(.serialized)` struct with four tests. Each test builds a `TodayViewModel` from an in-memory container pre-seeded to a specific state, constructs a `TodayView(viewModel: vm)` using the injected-VM init added in Step 1, and calls `assertSnapshot`:
 
 ```swift
 import SnapshotTesting
 import SwiftUI
+import SwiftData
 import Testing
 @testable import lifetrak
 
@@ -715,44 +721,22 @@ import Testing
 struct SnapshotTests {
 
     @Test func rendersEmptyState() throws {
-        let vm = try makeVM(oz: 0)
+        let (vm, container) = try makeVM(oz: 0)
         assertSnapshot(
-            of: TodayView(viewModel: vm),
-            as: .image(layout: .device(config: .iPhone16))
+            of: TodayView(viewModel: vm).modelContainer(container),
+            as: .image(precision: 0.99, layout: .device(config: .iPhone13Pro))
         )
     }
 
-    @Test func rendersPartialProgress() throws {
-        let vm = try makeVM(oz: 24)   // 24/64 = 37.5%
-        assertSnapshot(
-            of: TodayView(viewModel: vm),
-            as: .image(layout: .device(config: .iPhone16))
-        )
-    }
-
-    @Test func rendersGoalMet() throws {
-        let vm = try makeVM(oz: 64)   // green ring + "Goal reached!"
-        assertSnapshot(
-            of: TodayView(viewModel: vm),
-            as: .image(layout: .device(config: .iPhone16))
-        )
-    }
-
-    @Test func rendersWithStreak() throws {
-        let vm = try makeVM(oz: 64, priorDaysMeetingGoal: 2)
-        assertSnapshot(
-            of: TodayView(viewModel: vm),
-            as: .image(layout: .device(config: .iPhone16))
-        )
-    }
+    // ... rendersPartialProgress, rendersGoalMet, rendersWithStreak
 }
 ```
 
-A private `makeVM(oz:priorDaysMeetingGoal:)` helper creates the in-memory container, inserts the water Activity + Routine + Goal, inserts the appropriate Event records, and returns a `TodayViewModel`.
+A private `makeVM(oz:priorDaysMeetingGoal:)` helper creates the in-memory container, inserts the water Activity + Routine + Goal, inserts the appropriate Event records, saves, and returns `(TodayViewModel, ModelContainer)`. The `ModelContainer` is passed to `.modelContainer()` on the view because `TodayView` uses `@Query` internally which requires a container in the environment.
 
-**First run records reference images** into `lifetrakTests/__Snapshots__/SnapshotTests/`. Commit this directory. All subsequent runs diff against those images.
+**First run records reference images** into `lifetrakTests/__Snapshots__/SnapshotTests/`. Commit this directory (both `.1.png` and `.2.png` files). All subsequent runs diff against those images.
 
-**Important**: reference snapshots must be recorded on the same simulator model used in CI (iPhone 16 Pro, as configured in the workflow). If you record locally on a different device, snapshot tests will always fail in CI.
+**Important**: reference snapshots must be recorded on the same simulator model used in CI (iPhone 16 Pro, as configured in the workflow). If you record locally on a different device, snapshot tests will fail in CI.
 
 ---
 
@@ -829,6 +813,40 @@ Four changes to the existing file:
 | `.github/workflows/test.yml` | Modify — signing flag, xcresulttool, artifact upload | 4, 6 |
 
 The only step requiring Xcode GUI is adding the `swift-snapshot-testing` SPM package. Every other change is a pure Swift or YAML edit.
+
+---
+
+### Known issue — snapshot tests execute twice, producing duplicate reference files
+
+**Status: open / not yet fixed**
+
+#### What happens
+
+Each `@Test` function in `SnapshotTests` produces two reference PNG files — e.g. `rendersGoalMet.1.png` and `rendersGoalMet.2.png`. Both are identical in content. Both must be committed or CI fails.
+
+#### Why it happens
+
+When `xcodebuild test` runs a target that contains Swift Testing `@Test` functions, it launches two runners in the same process:
+
+1. **Native Swift Testing runner** — the real runner, designed for `@Test` functions
+2. **XCTest bridge** — a compatibility shim that re-exposes every `@Test` function as an `XCTestCase` method so xcodebuild's reporting pipeline (which was built around XCTest) can discover and track results
+
+Both runners execute the test body. `assertSnapshot` doesn't know which runner called it — it just increments a counter per test name to pick a filename. First call → `.1.png`, second call → `.2.png`.
+
+#### Why both files must be committed
+
+On a comparison run, `assertSnapshot` checks whether the reference file exists before comparing. If `.1.png` exists but `.2.png` is missing, the second runner treats the missing file as a new recording, writes it to disk, and **fails the test** (recording mode always fails by design — it's signalling "new reference written, please verify"). So omitting either file causes half the test invocations to always fail.
+
+#### What was tried and didn't work
+
+Converting `SnapshotTests` from Swift Testing (`@Suite`/`@Test`) to `XCTestCase` eliminates the bridge runner, giving only one invocation per test and only `.1.png` files. However, `XCTestCase` + `@MainActor` renders SwiftUI views differently from Swift Testing + `@MainActor` on the same machine and iOS version — approximately 4–5% pixel difference across all four tests. Because `@MainActor` cannot be removed (SwiftData `ModelContext` requires main-actor isolation), this approach produced four new failures and was reverted.
+
+#### Options to investigate
+
+- **Suppress the XCTest bridge for this target** — check whether a build setting or test plan option can disable the bridge runner for targets that use only Swift Testing. The flag `-only-testing` selects test classes/methods but does not select a runner.
+- **Use `SnapshotTesting`'s `withSnapshotTesting` API** — newer versions of the library may offer a way to name snapshots explicitly rather than relying on the auto-increment counter, which would let both runners write to the same file instead of `.1.png` / `.2.png`.
+- **File a radar / watch SE proposals** — the dual-runner behavior is an Apple toolchain issue. It may be resolved in a future Xcode release.
+- **Accept the duplication** — 8 files instead of 4 is low cost. If none of the above pan out cleanly, leaving it as-is is a reasonable long-term position.
 
 ---
 
