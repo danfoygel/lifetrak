@@ -544,7 +544,7 @@ Given the current stack (SwiftUI + SwiftData, Swift Testing, XCUITest), here is 
 
 ## Implementation Plan
 
-This section translates the six recommendations above into concrete, ordered work. Two recommendations are already complete; the rest are broken down file-by-file.
+This section translates the six recommendations above into concrete, ordered work. All six recommendations are now complete.
 
 ### Status of each recommendation
 
@@ -553,9 +553,9 @@ This section translates the six recommendations above into concrete, ordered wor
 | 1 | swift-snapshot-testing | **Done** — `SnapshotTesting` 1.19.1 added via SPM; `SnapshotTests.swift` created with 4 tests; reference images recorded |
 | 2 | In-memory SwiftData containers in all integration tests | **Done** — `TestHelpers.makeContainer()` is used in every test |
 | 3 | `--uitesting` + `--seed-*` launch argument handling | **Done** — merged in PR #12 |
-| 4 | GitHub Actions CI | Partial — workflow exists but lacks `CODE_SIGNING_ALLOWED=NO`, artifact upload, xcresulttool reporting |
+| 4 | GitHub Actions CI | **Done** — `CODE_SIGNING_ALLOWED=NO` added; artifact upload on failure added |
 | 5 | Exclude UI tests from CI by default | **Done** — workflow runs `-only-testing:lifetrakTests` only |
-| 6 | `xcresulttool` as authoritative source of truth | Not wired into CI |
+| 6 | `xcresulttool` as authoritative source of truth | **Done** — summary step added to workflow, runs after every test run |
 
 ---
 
@@ -741,7 +741,13 @@ A private `makeVM(oz:priorDaysMeetingGoal:)` helper creates the in-memory contai
 
 ---
 
-### Step 3 — GitHub Actions improvements (Recs 4 & 6)
+### Step 3 — GitHub Actions improvements (Recs 4 & 6) ✅ Done
+
+**Implementation notes:**
+- `CODE_SIGNING_ALLOWED=NO` added to the `Test` step — required on GitHub-hosted runners which have no signing certificates; without it the build fails at the sign phase
+- `Test summary` step added with `if: always()` — runs `xcrun xcresulttool get test-results summary --compact` after every run (pass or fail) and prints structured JSON to the workflow log; this is the authoritative source of truth for test results regardless of MCP truncation
+- `Upload test results` artifact step added with `if: failure()` — uploads the `.xcresult` bundle with a 7-day retention window so failures are fully debuggable from the Actions UI without needing a local re-run
+- Comment block added above the `Test` step explaining that UI tests are excluded and how to run them locally
 
 #### `.github/workflows/test.yml` — modify
 
