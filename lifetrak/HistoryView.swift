@@ -7,6 +7,10 @@ struct HistoryView: View {
     @State private var showingAddSheet = false
     @State private var editingEntry: Event?
 
+    init(viewModel: HistoryViewModel? = nil) {
+        _viewModel = State(initialValue: viewModel)
+    }
+
     var body: some View {
         NavigationStack {
             Group {
@@ -24,6 +28,7 @@ struct HistoryView: View {
                     } label: {
                         Image(systemName: "plus")
                     }
+                    .accessibilityIdentifier(AXID.History.addButton)
                 }
             }
             .sheet(isPresented: $showingAddSheet) {
@@ -81,6 +86,7 @@ struct HistoryView: View {
                 }
             }
             .listStyle(.insetGrouped)
+            .accessibilityIdentifier(AXID.History.entryList)
         }
     }
 
@@ -96,6 +102,7 @@ struct HistoryView: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
+        .accessibilityIdentifier(AXID.History.entryRow)
     }
 
     @ViewBuilder

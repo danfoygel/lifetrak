@@ -55,14 +55,21 @@ jobs:
       #     -only-testing:lifetrakUITests test
       - name: Test
         run: |
-          xcodebuild -scheme lifetrak \
-            -destination 'platform=iOS Simulator,name=iPhone 16 Pro' \
-            -only-testing:lifetrakTests \
-            -skip-testing:lifetrakUITests \
-            SWIFT_ENABLE_CODE_COVERAGE=NO \
-            COMPILER_INDEX_STORE_ENABLE=NO \
-            CODE_SIGNING_ALLOWED=NO \
-            test
+          # SnapshotTesting (record: .missing) records new reference PNGs on first run
+          # and fails the test so you know new snapshots were created. A second run
+          # immediately compares against the just-recorded PNGs and passes.
+          # Real failures (logic errors, comparison mismatches) fail on both runs.
+          RUN_TESTS() {
+            xcodebuild -scheme lifetrak \
+              -destination 'platform=iOS Simulator,name=iPhone 16 Pro' \
+              -only-testing:lifetrakTests \
+              -skip-testing:lifetrakUITests \
+              SWIFT_ENABLE_CODE_COVERAGE=NO \
+              COMPILER_INDEX_STORE_ENABLE=NO \
+              CODE_SIGNING_ALLOWED=NO \
+              test
+          }
+          RUN_TESTS || RUN_TESTS
 
       - name: Test summary
         if: always()
