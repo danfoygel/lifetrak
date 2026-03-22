@@ -22,10 +22,10 @@ LifeTrak already uses the **Swift Testing** framework (the `@Test` macro, not XC
 
 ### What belongs here
 
-- **ViewModel logic**: calculations, filtering, aggregation (e.g. `TodayViewModel.totalOz`, goal progress percentages)
-- **Pure functions**: `SleepAggregator`, date math, streak calculation
-- **Model computed properties**: `SleepNight.efficiency`, `Event.duration`
-- **Edge cases**: no data, goal of zero, overnight date boundaries
+- **ViewModel logic**: calculations, filtering, aggregation — `TodayViewModel` (progress, streak, weekly data, settings), `HistoryViewModel` (grouping, CRUD, sorting)
+- **Pure functions**: `SleepAggregator.aggregate(_:)`, date math helpers, `TimeInterval.sleepFormatted`
+- **Model computed properties**: `SleepNight.efficiency`, `SleepNight.timeInBed`, `Event.duration`
+- **Edge cases**: no data, goal of zero, overnight date boundaries, missed-day streak breaks, exact-midnight entries
 
 ### What does NOT belong here
 
@@ -81,58 +81,74 @@ The solution is an **in-memory `ModelContainer`**, which is discarded when the t
 
 ### Setting up an in-memory container
 
-Create a test helper (add to `lifetrakTests/TestHelpers.swift`):
+The helper lives in `lifetrakTests/TestHelpers.swift` and is already implemented:
 
 ```swift
 import SwiftData
 import Foundation
 
-/// Creates a ModelContainer backed by memory only — no disk I/O, discarded after tests.
-func makeTestContainer(for types: [any PersistentModel.Type]) throws -> ModelContainer {
-    let schema = Schema(types)
-    let config = ModelConfiguration(schema: schema, isStoredInMemoryOnly: true)
-    return try ModelContainer(for: schema, configurations: [config])
+@MainActor
+enum TestHelpers {
+    /// Creates a unique in-memory ModelContainer with all app models.
+    /// Each call returns an isolated container — no cross-test contamination.
+    static func makeContainer() throws -> ModelContainer {
+        let config = ModelConfiguration(
+            "test-\(UUID().uuidString)",
+            isStoredInMemoryOnly: true
+        )
+        return try ModelContainer(
+            for: Activity.self, Event.self, Routine.self, Goal.self,
+            RoutineSchedule.self, WaterEntry.self,
+            configurations: config
+        )
+    }
 }
 ```
+
+The UUID in the configuration name guarantees each container is fully isolated even when multiple tests run in parallel. Do **not** pass a static name — parallel tests sharing a name will crash on iOS 26.
 
 Usage in a Swift Testing test:
 
 ```swift
-@Test func totalOzAccumulatesCorrectly() async throws {
-    let container = try makeTestContainer(for: [WaterEntry.self])
+@Test func totalOzAccumulatesCorrectly() throws {
+    let container = try TestHelpers.makeContainer()
     let context = container.mainContext
 
-    // Seed the "existing" data
-    context.insert(WaterEntry(timestamp: .now, amount: 16))
-    context.insert(WaterEntry(timestamp: .now, amount: 8))
+    let activity = TestHelpers.makeWaterActivity(context: context)
+    TestHelpers.makeDefaultRoutine(context: context, waterActivity: activity)
+    context.insert(Event(activity: activity, quantity: 16))
+    context.insert(Event(activity: activity, quantity: 8))
     try context.save()
 
     let vm = TodayViewModel(modelContext: context)
-    await vm.refresh()
-
-    #expect(vm.totalOz == 24)
+    #expect(vm.todayTotal == 24)
 }
 ```
 
 ### Testing a realistic pre-populated state
 
-For tests that need a believable data set (e.g., "30 days of history"), use a seed helper:
+For tests that need a believable data set (e.g., "30 days of history"), use `TestHelpers` to build the required graph:
 
 ```swift
-func seedWaterHistory(context: ModelContext, days: Int, ozPerDay: Double) throws {
-    let calendar = Calendar.current
-    for dayOffset in 0..<days {
-        let date = calendar.date(byAdding: .day, value: -dayOffset, to: .now)!
-        let entries = Int.random(in: 3...6)
-        for _ in 0..<entries {
-            context.insert(WaterEntry(timestamp: date, amount: ozPerDay / Double(entries)))
-        }
-    }
+@Test func streakBreaksOnMissedDay() throws {
+    let container = try TestHelpers.makeContainer()
+    let context = container.mainContext
+
+    let activity = TestHelpers.makeWaterActivity(context: context)
+    TestHelpers.makeDefaultRoutine(context: context, waterActivity: activity)
+
+    // Meet goal today and 2 days ago — skip yesterday
+    context.insert(Event(activity: activity, quantity: 64.0))
+    let twoDaysAgo = Calendar.current.date(byAdding: .day, value: -2, to: .now)!
+    context.insert(Event(activity: activity, timestamp: twoDaysAgo, quantity: 64.0))
     try context.save()
+
+    let vm = TodayViewModel(modelContext: context)
+    #expect(vm.currentStreak == 1) // only today counts
 }
 ```
 
-This lets you write tests like "does the streak calculation correctly handle a 3-day gap in 30 days of data?"
+`TestHelpers` also provides `makeWaterActivity(context:)` and `makeDefaultRoutine(context:waterActivity:dailyGoal:)` to avoid repeating setup boilerplate.
 
 ---
 
@@ -445,36 +461,70 @@ Because this is a **public repository**, GitHub Actions macOS runners are **comp
 - You must pin the simulator name to what's actually available on the runner (check with `xcrun simctl list devices available`)
 - Code signing must be disabled for tests (or configured via secrets)
 
-**Sample workflow** (`/.github/workflows/test.yml`):
+The live workflow is `.github/workflows/test.yml`. Key points from the current implementation:
+
 ```yaml
-name: Tests
-on: [push, pull_request]
+name: Test
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
 
 jobs:
-  test:
-    runs-on: macos-latest
+  changes:        # skip CI when only docs change
+    runs-on: ubuntu-latest
+    outputs:
+      src: ${{ steps.filter.outputs.src }}
     steps:
       - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            src:
+              - 'lifetrak/**'
+              - 'lifetrakTests/**'
+              - 'lifetrak.xcodeproj/**'
+              - '.github/workflows/test.yml'
 
-      - name: Select Xcode version
-        run: sudo xcode-select -s /Applications/Xcode_16.2.app
-
-      - name: Run unit tests
+  test:
+    needs: changes
+    if: needs.changes.outputs.src == 'true'
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Select Xcode
         run: |
-          xcodebuild test \
-            -scheme lifetrak \
-            -destination 'platform=iOS Simulator,name=iPhone 16' \
+          XCODE_PATH=$(ls -d /Applications/Xcode*.app | sort -V | tail -1)
+          sudo xcode-select -s "$XCODE_PATH/Contents/Developer"
+      - name: Cache SDK stat cache
+        uses: actions/cache@v4
+        with:
+          path: ~/Library/Developer/Xcode/DerivedData/SDKStatCaches.noindex
+          key: ${{ runner.os }}-sdkstatcache-...
+      - name: Test
+        run: |
+          xcodebuild -scheme lifetrak \
+            -destination 'platform=iOS Simulator,name=iPhone 16 Pro' \
             -only-testing:lifetrakTests \
+            -skip-testing:lifetrakUITests \
+            SWIFT_ENABLE_CODE_COVERAGE=NO \
+            COMPILER_INDEX_STORE_ENABLE=NO \
             CODE_SIGNING_ALLOWED=NO \
-            | xcpretty
-
+            test
+      - name: Test summary     # always runs; xcresulttool JSON in the log
+        if: always()
+        run: |
+          RESULT=$(find ~/Library/Developer/Xcode/DerivedData -name "*.xcresult" | sort -t/ -k1,1 | tail -1)
+          [ -n "$RESULT" ] && xcrun xcresulttool get test-results summary --path "$RESULT" --compact
       - name: Upload test results
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: test-results
-          path: |
-            ~/Library/Developer/Xcode/DerivedData/**/Logs/Test/*.xcresult
+          name: test-results-${{ github.run_id }}
+          path: ~/Library/Developer/Xcode/DerivedData/**/Logs/Test/*.xcresult
+          retention-days: 7
 ```
 
 **Note on snapshot tests in CI**: Snapshot tests are pixel-exact. If your reference snapshots were recorded on a local Apple Silicon Mac and CI uses an Intel runner (or a different simulator scale), the tests will fail due to rendering differences. Solution: record reference snapshots on the CI machine by running with `isRecording = true` in a one-time job, then commit the results.
@@ -540,22 +590,125 @@ Given the current stack (SwiftUI + SwiftData, Swift Testing, XCUITest), here is 
 
 6. **Use `xcresulttool` as the authoritative source of truth** for test results when working with Claude Code — it provides complete structured output regardless of MCP truncation issues.
 
+All six recommendations are implemented. See the Implementation Plan below for details.
+
+---
+
+## Current Test Coverage (as of March 2026)
+
+### Unit / Integration Tests (`lifetrakTests`)
+
+All tests live in `AllTests.swift` as a single `@MainActor @Suite(.serialized)` struct. Serialization prevents concurrent `ModelContainer` creation, which crashes on iOS 26 beta.
+
+| Area | Test count | Key scenarios |
+|------|-----------|--------------|
+| `Activity` model | 5 | Create, defaults, manual/HealthKit sources, duration tracking |
+| `Event` model | 9 | Create, timestamp, delete, update, duration computed property, today-only filtering |
+| `Routine` / `Goal` model | 4 | Create, goals relationship, frequency/duration goals, snapshot creation |
+| `RoutineSchedule` model | 2 | Create, date-range resolution |
+| `TodayViewModel` — basic | 12 | Initial state, auto-defaults, log water, progress, goal met, excludes yesterday, custom goal/serving size, display strings |
+| `TodayViewModel` — weekly data | 4 | Always 7 entries, includes today, includes past days, excludes >7 days |
+| `TodayViewModel` — streak | 5 | Zero, one day, consecutive, breaks on missed day, starts from yesterday |
+| `TodayViewModel` — date edges | 2 | Exact midnight belongs to that day, one second before excluded |
+| `TodayViewModel` — settings | 2 | Round-trip, fractional values |
+| `HistoryViewModel` | 10 | Initially empty, groups by day, day total, newest-first sort, add/delete/update entry |
+| `SleepNight` model | 3 | `timeInBed`, `efficiency`, zero-time-in-bed edge case |
+| `TimeInterval.sleepFormatted` | 4 | h+m, minutes-only, zero, exact hours |
+| `SleepAggregator` | 6+ | Empty input, single night, wake-up-day assignment, stage aggregation, multi-night, inBed detection |
+| **Snapshot tests** | 4 | `TodayView`: empty state, partial progress, goal met, with streak |
+
+### UI Tests (`lifetrakUITests`)
+
+Three tests in `TodayViewUITests`. Run locally only (excluded from CI):
+
+| Test | Seed arg |
+|------|---------|
+| `testLogButtonExistsOnLaunch` | (none) |
+| `testProgressLabelShowsPartialProgress` | `--seed-partial-day` |
+| `testStreakLabelShowsAfter30Days` | `--seed-water-history` |
+
+### HealthKit mock
+
+`MockHealthKitService` implements `HealthKitServiceProtocol` with configurable `mockSleepNights`, `shouldThrowOnAuth`, and `shouldThrowOnFetch` flags. It is available to any test that injects it but is not yet used in `AllTests`.
+
+---
+
+## Remaining Recommendations
+
+The original six recommendations are all implemented. The areas below represent the next natural testing investments as the app grows.
+
+### 1. Snapshot tests for `HistoryView` and `SleepCard`
+
+`SnapshotTests.swift` currently covers only `TodayView`. As `HistoryView` and the sleep card are fleshed out, add snapshot tests for their key states:
+
+- `HistoryView`: empty state, one-day summary, multi-day list
+- `SleepCard`: standard night data, no-data / HealthKit unavailable
+
+Follow the same `makeVM` helper pattern and `named: "1"` fix used in the existing snapshot suite.
+
+### 2. `HistoryViewModel` tests using `MockHealthKitService`
+
+The mock is built; it just needs wiring into tests. When `HistoryViewModel` (or a future `SleepViewModel`) gains a `HealthKitServiceProtocol` dependency, add tests covering:
+
+- Successful sleep fetch populates the view model
+- Authorization failure surfaces an error state
+- Query failure surfaces an error state
+
+Use constructor injection (`HistoryViewModel(modelContext:healthKitService:)`) to keep it testable without touching the real HealthKit store.
+
+### 3. UI tests for `HistoryView`
+
+The UI test infrastructure (`--uitesting`, `UITestSeeder`, `AXID`) is ready to extend. Useful next tests:
+
+- Swipe-to-delete removes an entry
+- Tap an entry to edit it; confirm the updated value appears
+- History is empty when launched without seed data
+
+Add the required `AXID.History.*` constants to `AccessibilityIdentifiers.swift` and the corresponding `.accessibilityIdentifier(...)` calls to `HistoryView` before writing these tests.
+
+### 4. Parameterized streak tests
+
+Swift Testing supports `@Test(arguments:)` for data-driven tests. The streak logic has several boundary cases that are currently written as individual tests. Consolidating them into a parameterized table would reduce boilerplate and make it easy to add new cases:
+
+```swift
+@Test(arguments: [
+    (daysBack: [0, 1, 2], expectedStreak: 3),
+    (daysBack: [0, 2],    expectedStreak: 1),   // gap on day 1
+    (daysBack: [1, 2],    expectedStreak: 2),   // today not met
+])
+func todayVM_streakScenarios(daysBack: [Int], expectedStreak: Int) throws { … }
+```
+
+### 5. Performance baseline (optional)
+
+If the entry list or weekly chart becomes noticeably slow with large datasets, add an `XCTest` performance test to catch regressions:
+
+```swift
+func testHistoryViewModelWith500Days() {
+    measure {
+        // seed 500 days, init HistoryViewModel, read daySummaries
+    }
+}
+```
+
+Performance tests require `XCTestCase` (not Swift Testing `@Test`). They can live in a separate `PerformanceTests.swift` file in `lifetrakTests` without affecting the Swift Testing suite.
+
 ---
 
 ## Implementation Plan
 
-This section translates the six recommendations above into concrete, ordered work. All six recommendations are now complete.
+This section documents how the six recommendations above were implemented.
 
 ### Status of each recommendation
 
 | # | Recommendation | Status |
 |---|---------------|--------|
-| 1 | swift-snapshot-testing | **Done** — `SnapshotTesting` 1.19.1 added via SPM; `SnapshotTests.swift` created with 4 tests; reference images recorded |
-| 2 | In-memory SwiftData containers in all integration tests | **Done** — `TestHelpers.makeContainer()` is used in every test |
-| 3 | `--uitesting` + `--seed-*` launch argument handling | **Done** — merged in PR #12 |
-| 4 | GitHub Actions CI | **Done** — `CODE_SIGNING_ALLOWED=NO` added; artifact upload on failure added |
-| 5 | Exclude UI tests from CI by default | **Done** — workflow runs `-only-testing:lifetrakTests` only |
-| 6 | `xcresulttool` as authoritative source of truth | **Done** — summary step added to workflow, runs after every test run |
+| 1 | swift-snapshot-testing | **Done** — `SnapshotTesting` 1.19.1 via SPM; `SnapshotTests.swift` with 4 tests; reference PNGs in `__Snapshots__/` |
+| 2 | In-memory SwiftData containers in all integration tests | **Done** — `TestHelpers.makeContainer()` (UUID-named, all models) used in every test |
+| 3 | `--uitesting` + `--seed-*` launch argument handling | **Done** — `UITestSeeder`, `AccessibilityIdentifiers`, 3 UI tests (PR #12) |
+| 4 | GitHub Actions CI | **Done** — `macos-15` runner, auto-detect Xcode, `CODE_SIGNING_ALLOWED=NO`, artifact upload on failure |
+| 5 | Exclude UI tests from CI by default | **Done** — workflow uses `-only-testing:lifetrakTests -skip-testing:lifetrakUITests` |
+| 6 | `xcresulttool` as authoritative source of truth | **Done** — `Test summary` step (`if: always()`) prints compact JSON after every run |
 
 ---
 
