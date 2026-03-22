@@ -13,7 +13,7 @@ struct SnapshotTests {
         assertSnapshot(
             of: TodayView(viewModel: vm).modelContainer(container),
             as: .image(precision: 0.99, layout: .device(config: .iPhone13Pro)),
-            named: "rendersEmptyState"
+            named: "1"
         )
     }
 
@@ -22,7 +22,7 @@ struct SnapshotTests {
         assertSnapshot(
             of: TodayView(viewModel: vm).modelContainer(container),
             as: .image(precision: 0.99, layout: .device(config: .iPhone13Pro)),
-            named: "rendersPartialProgress"
+            named: "1"
         )
     }
 
@@ -31,7 +31,7 @@ struct SnapshotTests {
         assertSnapshot(
             of: TodayView(viewModel: vm).modelContainer(container),
             as: .image(precision: 0.99, layout: .device(config: .iPhone13Pro)),
-            named: "rendersGoalMet"
+            named: "1"
         )
     }
 
@@ -40,7 +40,7 @@ struct SnapshotTests {
         assertSnapshot(
             of: TodayView(viewModel: vm).modelContainer(container),
             as: .image(precision: 0.99, layout: .device(config: .iPhone13Pro)),
-            named: "rendersWithStreak"
+            named: "1"
         )
     }
 
