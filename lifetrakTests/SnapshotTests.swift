@@ -12,7 +12,8 @@ struct SnapshotTests {
         let (vm, container) = try makeVM(oz: 0)
         assertSnapshot(
             of: TodayView(viewModel: vm).modelContainer(container),
-            as: .image(precision: 0.99, layout: .device(config: .iPhone13Pro))
+            as: .image(precision: 0.99, layout: .device(config: .iPhone13Pro)),
+            named: "1"
         )
     }
 
@@ -20,7 +21,8 @@ struct SnapshotTests {
         let (vm, container) = try makeVM(oz: 24)   // 24/64 = 37.5%
         assertSnapshot(
             of: TodayView(viewModel: vm).modelContainer(container),
-            as: .image(precision: 0.99, layout: .device(config: .iPhone13Pro))
+            as: .image(precision: 0.99, layout: .device(config: .iPhone13Pro)),
+            named: "1"
         )
     }
 
@@ -28,7 +30,8 @@ struct SnapshotTests {
         let (vm, container) = try makeVM(oz: 64)   // green ring + "Goal reached!"
         assertSnapshot(
             of: TodayView(viewModel: vm).modelContainer(container),
-            as: .image(precision: 0.99, layout: .device(config: .iPhone13Pro))
+            as: .image(precision: 0.99, layout: .device(config: .iPhone13Pro)),
+            named: "1"
         )
     }
 
@@ -36,7 +39,8 @@ struct SnapshotTests {
         let (vm, container) = try makeVM(oz: 64, priorDaysMeetingGoal: 2)
         assertSnapshot(
             of: TodayView(viewModel: vm).modelContainer(container),
-            as: .image(precision: 0.99, layout: .device(config: .iPhone13Pro))
+            as: .image(precision: 0.99, layout: .device(config: .iPhone13Pro)),
+            named: "1"
         )
     }
 
