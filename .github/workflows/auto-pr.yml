@@ -18,14 +18,20 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          set -x
           BRANCH="${GITHUB_REF#refs/heads/}"
+          echo "Branch: $BRANCH"
+          gh auth status
           # Check if a PR already exists for this branch
-          EXISTING=$(gh pr list --head "$BRANCH" --base main --json number --jq '.[0].number' 2>/dev/null || echo "")
+          EXISTING=$(gh pr list --repo "$GITHUB_REPOSITORY" --head "$BRANCH" --base main --json number --jq '.[0].number' 2>/dev/null || echo "")
+          echo "Existing PR: $EXISTING"
           if [ -n "$EXISTING" ]; then
             echo "PR #$EXISTING already exists for branch $BRANCH"
           else
             TITLE=$(git log -1 --pretty=%s)
+            echo "Creating PR with title: $TITLE"
             gh pr create \
+              --repo "$GITHUB_REPOSITORY" \
               --base main \
               --head "$BRANCH" \
               --title "$TITLE" \
